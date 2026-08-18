@@ -295,8 +295,7 @@ export const AdminSettingsView: React.FC = () => {
     );
   }
 
-  return (
-    <div className="space-y-6">
+  return (    <div className="space-y-6">
       {/* Header */}
       <div>
         <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2.5">
@@ -799,9 +798,7 @@ export const AdminSettingsView: React.FC = () => {
             </button>
           </div>
         </form>
-      )}
-
-      {/* TAB 2: USUÁRIOS E APROVAÇÃO */}
+      )}      {/* TAB 2: USUÁRIOS E APROVAÇÃO */}
       {activeTab === 'usuarios' && (
         <div className="space-y-6">
           {/* SEÇÃO 1: SOLICITAÇÕES DE CADASTRO PENDENTES */}
@@ -1021,7 +1018,7 @@ export const AdminSettingsView: React.FC = () => {
       {/* ... usuarios view ... */}
 
       {/* TAB: PERMISSÕES POR FUNÇÃO */}
-      {activeTab === 'permissoes' && (
+      {activeTab === 'permissoes' && (      {activeTab === 'permissoes' && (
         <div className="space-y-4">
           <div className="p-4 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-start gap-3">
             <Lock className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
@@ -1381,3 +1378,6 @@ export const AdminSettingsView: React.FC = () => {
     </div>
   );
 };
+
+
+
