@@ -53,7 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     logout,
     pendingApprovalCount,
   } = useAuth();
-  const { serviceOrders, parts, warrantyRevisions, motorcycles, clients, settings } = useStore();
+  const { serviceOrders, parts, warrantyRevisions, motorcycles, clients, settings, canViewSection } = useStore();
 
   // Filter counters based on current user role
   const filteredOrders = serviceOrders.filter((o) => {
@@ -105,138 +105,83 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const roleInfo = getRoleBadge(currentUser?.role);
 
-  // Define menu sections customized per role
+  // Menu is built from a single canonical item list, then filtered per the
+  // current user's role using role_permissions (admin-configurable via
+  // Configurações → Permissões). Labels stay a little personalized per role
+  // where that's genuinely useful (e.g. "Meus Clientes" for vendedor), but
+  // visibility itself now comes entirely from the permission table instead
+  // of being hardcoded per role.
+  const role = currentUser?.role;
+  const dashboardLabel =
+    isVendedor ? 'Meu Painel' : isMecanico ? 'Painel da Oficina' : 'Dashboard Geral';
+  const clientesLabel = isVendedor ? 'Meus Clientes' : 'Clientes';
+  const motosLabel = isVendedor ? 'Minhas Motos Vendidas' : isMecanico ? 'Motos Cadastradas' : 'Motos Vendidas';
+  const ordensLabel = isVendedor ? 'Minhas Ordens de Serviço' : 'Ordens de Serviço';
+  const estoqueLabel = isVendedor ? 'Consulta de Peças' : 'Estoque de Peças';
+
+  const allSections: { title: string; items: any[] }[] = [
+    {
+      title: 'VISÃO GERAL',
+      items: [{ id: 'dashboard', label: dashboardLabel, icon: LayoutDashboard }],
+    },
+    {
+      title: 'GESTÃO COMERCIAL',
+      items: [
+        { id: 'clientes', label: clientesLabel, icon: Users },
+        { id: 'motos', label: motosLabel, icon: Bike },
+        {
+          id: 'revisoes',
+          label: isVendedor ? 'Revisões (Avisar Clientes)' : 'Revisões de Garantia',
+          icon: CalendarClock,
+          highlight: !isVendedor,
+          badge: overdueRevisionsCount > 0 && isVendedor
+            ? `${overdueRevisionsCount} atrasadas`
+            : pendingRevisionsCount > 0
+            ? pendingRevisionsCount
+            : undefined,
+          badgeColor: overdueRevisionsCount > 0 && isVendedor ? 'bg-rose-600 text-white font-bold animate-pulse' : 'bg-amber-500 text-slate-950',
+        },
+      ],
+    },
+    {
+      title: 'OFICINA & SERVIÇOS',
+      items: [
+        {
+          id: 'ordens',
+          label: ordensLabel,
+          icon: ClipboardList,
+          badge: openOrdersCount > 0 ? openOrdersCount : undefined,
+          badgeColor: 'bg-red-600 text-white',
+        },
+        { id: 'servicos', label: 'Tabela de Serviços', icon: Wrench },
+      ],
+    },
+    {
+      title: 'ESTOQUE & PEÇAS',
+      items: [
+        {
+          id: 'estoque',
+          label: estoqueLabel,
+          icon: Package,
+          badge: lowStockCount > 0 ? `${lowStockCount} baixo` : undefined,
+          badgeColor: 'bg-rose-600 text-white',
+        },
+        { id: 'movimentacoes', label: 'Movimentações', icon: History },
+      ],
+    },
+    {
+      title: 'ANÁLISE & RELATÓRIOS',
+      items: [{ id: 'relatorios', label: 'Relatórios Gerenciais', icon: BarChart3 }],
+    },
+  ];
+
   const getMenuSections = () => {
-    if (isVendedor) {
-      return [
-        {
-          title: 'MINHA GESTÃO COMERCIAL',
-          items: [
-            { id: 'dashboard', label: 'Meu Painel', icon: LayoutDashboard },
-            { id: 'clientes', label: 'Meus Clientes', icon: Users },
-            { id: 'motos', label: 'Minhas Motos Vendidas', icon: Bike },
-            {
-              id: 'revisoes',
-              label: 'Revisões (Avisar Clientes)',
-              icon: CalendarClock,
-              badge: overdueRevisionsCount > 0 ? `${overdueRevisionsCount} atrasadas` : pendingRevisionsCount > 0 ? pendingRevisionsCount : undefined,
-              badgeColor: overdueRevisionsCount > 0 ? 'bg-rose-600 text-white font-bold animate-pulse' : 'bg-amber-500 text-slate-950',
-            },
-          ],
-        },
-        {
-          title: 'OFICINA & ATENDIMENTO',
-          items: [
-            {
-              id: 'ordens',
-              label: 'Minhas Ordens de Serviço',
-              icon: ClipboardList,
-              badge: openOrdersCount > 0 ? openOrdersCount : undefined,
-              badgeColor: 'bg-red-600 text-white',
-            },
-            { id: 'servicos', label: 'Tabela de Serviços', icon: Wrench },
-            { id: 'estoque', label: 'Consulta de Peças', icon: Package },
-          ],
-        },
-      ];
-    }
-
-    if (isMecanico) {
-      return [
-        {
-          title: 'OFICINA & EXECUÇÃO',
-          items: [
-            { id: 'dashboard', label: 'Painel da Oficina', icon: LayoutDashboard },
-            {
-              id: 'ordens',
-              label: 'Ordens de Serviço',
-              icon: ClipboardList,
-              badge: openOrdersCount > 0 ? openOrdersCount : undefined,
-              badgeColor: 'bg-red-600 text-white',
-            },
-            {
-              id: 'revisoes',
-              label: 'Revisões de Garantia',
-              icon: CalendarClock,
-              badge: pendingRevisionsCount > 0 ? pendingRevisionsCount : undefined,
-              badgeColor: 'bg-amber-500 text-slate-950',
-            },
-          ],
-        },
-        {
-          title: 'CADASTROS & ESTOQUE',
-          items: [
-            { id: 'motos', label: 'Motos Cadastradas', icon: Bike },
-            { id: 'clientes', label: 'Clientes', icon: Users },
-            {
-              id: 'estoque',
-              label: 'Estoque de Peças',
-              icon: Package,
-              badge: lowStockCount > 0 ? `${lowStockCount} baixo` : undefined,
-              badgeColor: 'bg-rose-600 text-white',
-            },
-            { id: 'servicos', label: 'Tabela de Serviços', icon: Wrench },
-          ],
-        },
-      ];
-    }
-
-    // Default for Recepcionista and Admin
-    return [
-      {
-        title: 'VISÃO GERAL',
-        items: [
-          { id: 'dashboard', label: 'Dashboard Geral', icon: LayoutDashboard },
-        ],
-      },
-      {
-        title: 'GESTÃO COMERCIAL',
-        items: [
-          { id: 'clientes', label: 'Clientes', icon: Users },
-          { id: 'motos', label: 'Motos Vendidas', icon: Bike },
-          {
-            id: 'revisoes',
-            label: 'Revisões de Garantia',
-            icon: CalendarClock,
-            highlight: true,
-            badge: pendingRevisionsCount > 0 ? pendingRevisionsCount : undefined,
-            badgeColor: 'bg-amber-500 text-slate-950',
-          },
-        ],
-      },
-      {
-        title: 'OFICINA & SERVIÇOS',
-        items: [
-          {
-            id: 'ordens',
-            label: 'Ordens de Serviço',
-            icon: ClipboardList,
-            badge: openOrdersCount > 0 ? openOrdersCount : undefined,
-            badgeColor: 'bg-red-600 text-white',
-          },
-          { id: 'servicos', label: 'Tabela de Serviços', icon: Wrench },
-        ],
-      },
-      {
-        title: 'ESTOQUE & PEÇAS',
-        items: [
-          {
-            id: 'estoque',
-            label: 'Estoque de Peças',
-            icon: Package,
-            badge: lowStockCount > 0 ? `${lowStockCount} baixo` : undefined,
-            badgeColor: 'bg-rose-600 text-white',
-          },
-          { id: 'movimentacoes', label: 'Movimentações', icon: History },
-        ],
-      },
-      {
-        title: 'ANÁLISE & RELATÓRIOS',
-        items: [
-          { id: 'relatorios', label: 'Relatórios Gerenciais', icon: BarChart3 },
-        ],
-      },
-    ];
+    return allSections
+      .map((section) => ({
+        ...section,
+        items: section.items.filter((item) => canViewSection(role, item.id)),
+      }))
+      .filter((section) => section.items.length > 0);
   };
 
   const menuSections = getMenuSections();
