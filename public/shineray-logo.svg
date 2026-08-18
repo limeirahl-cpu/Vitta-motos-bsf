@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 320" width="100%" height="100%">
+  <!-- Shineray Official Geometric Red Emblem -->
+  <g transform="translate(200, 90)">
+    <!-- Top-Left Wing -->
+    <polygon points="0,-10 -75,-80 -40,-10" fill="#E11D23" />
+    <!-- Top-Right Wing -->
+    <polygon points="0,-10 75,-80 40,-10" fill="#B91C1C" />
+    <!-- Bottom-Left Wing -->
+    <polygon points="0,10 -75,80 -40,10" fill="#B91C1C" />
+    <!-- Bottom-Right Wing -->
+    <polygon points="0,10 75,80 40,10" fill="#E11D23" />
+    <!-- Center Diamond Highlight -->
+    <polygon points="0,-20 20,0 0,20 -20,0" fill="#EF4444" />
+  </g>
+
+  <!-- Wordmark SHINERAY -->
+  <g font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="900" font-size="52" letter-spacing="2">
+    <text x="75" y="240" fill="#111827">SH</text>
+    <text x="162" y="240" fill="#E11D23" font-style="italic">/</text>
+    <text x="186" y="240" fill="#111827">NERAY</text>
+  </g>
+</svg>

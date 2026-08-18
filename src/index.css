@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+/* 
+  A4 Print Optimization Stylesheet
+  Standardizes printing & PDF export across browsers (Chrome, Edge, Firefox, Safari)
+*/
+@media print {
+  /* Page Setup: Standard A4 Portrait */
+  @page {
+    size: A4 portrait;
+    margin: 6mm 8mm;
+  }
+
+  /* Reset global root & body styles for clean printing */
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+    font-size: 10pt;
+  }
+
+  /* Hide all app chrome, sidebars, headers, floating widgets, and modal backdrops */
+  header,
+  nav,
+  aside,
+  footer,
+  .no-print,
+  .print\:hidden,
+  button,
+  [role="dialog"] > div:first-child:not(.printable-document-wrapper),
+  div[class*="backdrop-blur"],
+  div[class*="bg-slate-950/80"],
+  div[class*="bg-slate-900/60"] {
+    background: transparent !important;
+  }
+
+  /* When printing from a modal dialog, isolate the printable page */
+  body.printing-active-doc #root > div:not(.print-container-root) {
+    display: none !important;
+  }
+
+  /* Printable container root rules */
+  .printable-document-page {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  /* Prevent awkward page breaks in the middle of sections or signatures */
+  .print-avoid-break,
+  .print-section,
+  table,
+  tr,
+  .print-signatures {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* Force background colors on tables and headers */
+  .bg-neutral-200, .bg-neutral-100, .bg-slate-100 {
+    background-color: #e5e5e5 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Ensure crisp high-contrast lines */
+  .border-black {
+    border-color: #000000 !important;
+  }
+
+  /* Hide scrollbars during print */
+  ::-webkit-scrollbar {
+    display: none !important;
+  }
+}
