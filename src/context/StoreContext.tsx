@@ -12,6 +12,7 @@ import {
   osServiceItemToRow,
   partFromRow,
   partToRow,
+  rolePermissionFromRow,
   serviceFromRow,
   serviceOrderFromRow,
   serviceOrderToRow,
@@ -29,12 +30,15 @@ import {
   Motorcycle,
   Part,
   RevisionStatus,
+  RolePermission,
+  SectionKey,
   ServiceOrder,
   ServiceOrderStatus,
   StockExitReason,
   StockMovement,
   StoreSettings,
   SystemNotification,
+  UserRole,
   WarrantyRevision,
   WarrantyRuleConfig,
   WorkshopService,
@@ -152,6 +156,10 @@ interface StoreContextType {
   resetDatabase: () => Promise<{ success: boolean; message?: string }>;
   exportDatabaseJSON: () => string;
   importDatabaseJSON: (jsonStr: string) => Promise<{ success: boolean; message?: string }>;
+
+  rolePermissions: RolePermission[];
+  canViewSection: (role: UserRole | undefined, sectionKey: SectionKey) => boolean;
+  updateRolePermission: (role: UserRole, sectionKey: SectionKey, canView: boolean) => Promise<{ success: boolean; message?: string }>;
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
@@ -188,6 +196,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [settings, setSettings] = useState<StoreSettings>(DEFAULT_SETTINGS);
   const [errorReports, setErrorReports] = useState<ErrorReport[]>([]);
+  const [rolePermissions, setRolePermissions] = useState<RolePermission[]>([]);
   const [isDataReady, setIsDataReady] = useState(false);
 
   const currentUserRef = useRef(currentUser);
@@ -247,6 +256,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const { data } = await supabase.from('error_reports').select('*').order('created_at', { ascending: false });
     if (data) setErrorReports(data.map(errorReportFromRow));
   };
+  const refetchRolePermissions = async () => {
+    const { data } = await supabase.from('role_permissions').select('*');
+    if (data) setRolePermissions(data.map(rolePermissionFromRow));
+  };
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -261,6 +274,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setAuditLogs([]);
       setSettings(DEFAULT_SETTINGS);
       setErrorReports([]);
+      setRolePermissions([]);
       setIsDataReady(false);
       return;
     }
@@ -279,6 +293,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         refetchAuditLogs(),
         refetchSettings(),
         refetchErrorReports(),
+        refetchRolePermissions(),
       ]);
       if (active) setIsDataReady(true);
     })();
@@ -301,6 +316,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_logs' }, refetchAuditLogs)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'store_settings' }, refetchSettings)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'error_reports' }, refetchErrorReports)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'role_permissions' }, refetchRolePermissions)
       .subscribe();
 
     return () => {
@@ -345,6 +361,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const getClientById = (id: string) => clients.find((c) => c.id === id);
   const getMotorcycleById = (id: string) => motorcycles.find((m) => m.id === id);
   const getPartById = (id: string) => parts.find((p) => p.id === id);
+
+  // Admin always sees everything, regardless of what's configured in
+  // role_permissions - this table only controls the OTHER roles, and
+  // defaults to visible (true) if a role/section combination has no row
+  // yet, so newly added sections don't silently disappear for everyone.
+  const canViewSection = (role: UserRole | undefined, sectionKey: SectionKey): boolean => {
+    if (!role) return false;
+    if (role === 'admin') return true;
+    const found = rolePermissions.find((p) => p.role === role && p.sectionKey === sectionKey);
+    return found ? found.canView : true;
+  };
 
   // ---------- CLIENTS ----------
   const addClient = async (clientData: Omit<Client, 'id' | 'createdAt'>) => {
@@ -581,9 +608,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     return { success: importedCount > 0, importedCount, createdClientsCount, errors };
-  };
-
-  // ---------- PARTS & INVENTORY ----------
+  };  // ---------- PARTS & INVENTORY ----------
   const addPart = async (partData: Omit<Part, 'id' | 'createdAt'>) => {
     const skuExists = parts.some((p) => p.sku.toLowerCase().trim() === partData.sku.toLowerCase().trim());
     if (skuExists) {
@@ -888,9 +913,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (error) return { success: false, message: error.message };
     await logAudit('Exclusão de OS', `Excluiu a ${os.orderNumber}`, 'Ordens de Serviço', id);
     return { success: true };
-  };
-
-  // ---------- WARRANTY REVISIONS ----------
+  };  // ---------- WARRANTY REVISIONS ----------
   const registerCompletedRevision = async (data: {
     motorcycleId: string;
     revisionNumber: number;
@@ -994,6 +1017,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await logAudit(
       'Regras de Revisão Atualizadas',
       `1ª revisão: ${rules.firstRevisionKm}km, Intervalo: ${rules.subsequentIntervalKm}km, Meses: ${rules.intervalMonths}m`,
+      'Configurações'
+    );
+    return { success: true };
+  };
+
+  const updateRolePermission = async (role: UserRole, sectionKey: SectionKey, canView: boolean) => {
+    if (role === 'admin') {
+      return { success: false, message: 'O administrador sempre tem acesso a todas as seções.' };
+    }
+    const { error } = await supabase
+      .from('role_permissions')
+      .upsert({ role, section_key: sectionKey, can_view: canView, updated_at: new Date().toISOString() }, { onConflict: 'role,section_key' });
+    if (error) return { success: false, message: error.message };
+
+    await refetchRolePermissions();
+    await logAudit(
+      'Permissões de Papel Atualizadas',
+      `${canView ? 'Concedeu' : 'Revogou'} acesso à seção "${sectionKey}" para o papel "${role}"`,
       'Configurações'
     );
     return { success: true };
@@ -1171,6 +1212,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         resetDatabase,
         exportDatabaseJSON,
         importDatabaseJSON,
+        rolePermissions,
+        canViewSection,
+        updateRolePermission,
       }}
     >
       {children}
@@ -1185,3 +1229,5 @@ export const useStore = () => {
   }
   return context;
 };
+
+
