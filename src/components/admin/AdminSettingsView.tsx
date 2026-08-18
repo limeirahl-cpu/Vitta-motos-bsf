@@ -608,8 +608,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     return { success: importedCount > 0, importedCount, createdClientsCount, errors };
-  };
-  // ---------- PARTS & INVENTORY ----------
+  };  // ---------- PARTS & INVENTORY ----------
   const addPart = async (partData: Omit<Part, 'id' | 'createdAt'>) => {
     const skuExists = parts.some((p) => p.sku.toLowerCase().trim() === partData.sku.toLowerCase().trim());
     if (skuExists) {
@@ -914,8 +913,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (error) return { success: false, message: error.message };
     await logAudit('Exclusão de OS', `Excluiu a ${os.orderNumber}`, 'Ordens de Serviço', id);
     return { success: true };
-  };
-  // ---------- WARRANTY REVISIONS ----------
+  };  // ---------- WARRANTY REVISIONS ----------
   const registerCompletedRevision = async (data: {
     motorcycleId: string;
     revisionNumber: number;
