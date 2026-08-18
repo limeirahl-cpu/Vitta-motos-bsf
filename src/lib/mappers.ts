@@ -11,6 +11,7 @@ import {
   OSPartItem,
   OSServiceItem,
   Part,
+  RolePermission,
   ServiceOrder,
   StockMovement,
   StoreSettings,
@@ -469,5 +470,14 @@ export function errorReportFromRow(row: any): ErrorReport {
     resolvedAt: row.resolved_at || undefined,
     resolvedBy: row.resolved_by || undefined,
     createdAt: row.created_at,
+  };
+}
+
+// ---------- Role Permissions ----------
+export function rolePermissionFromRow(row: any): RolePermission {
+  return {
+    role: row.role,
+    sectionKey: row.section_key,
+    canView: row.can_view,
   };
 }
