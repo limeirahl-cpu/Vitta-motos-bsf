@@ -1,1231 +1,1380 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import React, { useState } from 'react';
 import {
-  auditLogFromRow,
-  clientFromRow,
-  clientToRow,
-  errorReportFromRow,
-  motorcycleFromRow,
-  motorcycleToRow,
-  notificationFromRow,
-  osPartItemToRow,
-  osServiceItemToRow,
-  partFromRow,
-  partToRow,
-  rolePermissionFromRow,
-  serviceFromRow,
-  serviceOrderFromRow,
-  serviceOrderToRow,
-  serviceToRow,
-  settingsFromRow,
-  settingsToRow,
-  stockMovementFromRow,
-  warrantyRevisionFromRow,
-} from '../lib/mappers';
-import {
-  AuditLog,
-  Client,
-  ErrorReport,
-  ErrorStatus,
-  Motorcycle,
-  Part,
-  RevisionStatus,
-  RolePermission,
-  SectionKey,
-  ServiceOrder,
-  ServiceOrderStatus,
-  StockExitReason,
-  StockMovement,
-  StoreSettings,
-  SystemNotification,
-  UserRole,
-  WarrantyRevision,
-  WarrantyRuleConfig,
-  WorkshopService,
-} from '../types';
-import { ParsedNfeData } from '../utils/nfeParser';
-import { computeNextScheduledRevision, DEFAULT_WARRANTY_RULES } from '../utils/warrantyCalculator';
-import { useAuth } from './AuthContext';
+  AlertCircle,
+  Bug,
+  Building2,
+  CheckCircle,
+  CheckCircle2,
+  Clock,
+  Database,
+  Download,
+  Lock,
+  Mail,
+  Phone,
+  Plus,
+  RefreshCw,
+  Save,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
+  ToggleLeft,
+  ToggleRight,
+  Trash2,
+  Upload,
+  UserCheck,
+  UserPlus,
+  Users,
+  Wrench,
+  X,
+  XCircle,
+} from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { useStore } from '../../context/StoreContext';
+import { SectionKey, UserRole } from '../../types';
+import { formatDate } from '../../utils/formatters';
+import { ConfirmationModal } from '../common/ConfirmationModal';
+import { ErrorReportsSection } from './ErrorReportsSection';
 
-interface StoreContextType {
-  clients: Client[];
-  motorcycles: Motorcycle[];
-  parts: Part[];
-  services: WorkshopService[];
-  serviceOrders: ServiceOrder[];
-  stockMovements: StockMovement[];
-  warrantyRevisions: WarrantyRevision[];
-  notifications: SystemNotification[];
-  auditLogs: AuditLog[];
-  settings: StoreSettings;
-  errorReports: ErrorReport[];
-  pendingErrorReportsCount: number;
-  isDataReady: boolean;
+const PERMISSION_SECTIONS: { key: SectionKey; label: string }[] = [
+  { key: 'dashboard', label: 'Painel / Dashboard' },
+  { key: 'clientes', label: 'Clientes' },
+  { key: 'motos', label: 'Motos Vendidas' },
+  { key: 'revisoes', label: 'Revisões de Garantia' },
+  { key: 'ordens', label: 'Ordens de Serviço (Oficina)' },
+  { key: 'servicos', label: 'Tabela de Serviços' },
+  { key: 'estoque', label: 'Estoque de Peças' },
+  { key: 'movimentacoes', label: 'Movimentações de Estoque' },
+  { key: 'relatorios', label: 'Relatórios Gerenciais' },
+];
 
-  addErrorReport: (data: Omit<ErrorReport, 'id' | 'createdAt' | 'status'>) => Promise<{
-    success: boolean;
-    report?: ErrorReport;
-    message?: string;
-  }>;
-  updateErrorReportStatus: (
-    id: string,
-    status: ErrorStatus,
-    adminResponse?: string,
-    resolvedBy?: string
-  ) => Promise<{ success: boolean; message?: string }>;
-  deleteErrorReport: (id: string) => Promise<{ success: boolean; message?: string }>;
+const PERMISSION_ROLES: { key: UserRole; label: string }[] = [
+  { key: 'vendedor', label: 'Vendedor' },
+  { key: 'recepcionista', label: 'Recepcionista' },
+  { key: 'mecanico', label: 'Mecânico' },
+];
 
-  addClient: (client: Omit<Client, 'id' | 'createdAt'>) => Promise<{ success: boolean; client?: Client; message?: string }>;
-  updateClient: (id: string, updates: Partial<Client>) => Promise<{ success: boolean; message?: string }>;
-  deleteClient: (id: string) => Promise<{ success: boolean; message?: string }>;
+export const AdminSettingsView: React.FC = () => {
+  const {
+    settings,
+    updateSettings,
+    parts,
+    recalculateAllPartsPrices,
+    auditLogs,
+    resetDatabase,
+    exportDatabaseJSON,
+    importDatabaseJSON,
+    pendingErrorReportsCount,
+    rolePermissions,
+    updateRolePermission,
+  } = useStore();
+  const {
+    users,
+    addUser,
+    deleteUser,
+    updateUser,
+    toggleUserActive,
+    approveUser,
+    rejectUser,
+    pendingApprovalUsers,
+    pendingApprovalCount,
+    currentUser,
+    isAdmin,
+  } = useAuth();
 
-  addMotorcycle: (
-    moto: Omit<Motorcycle, 'id' | 'createdAt'>
-  ) => Promise<{ success: boolean; motorcycle?: Motorcycle; message?: string }>;
-  updateMotorcycle: (id: string, updates: Partial<Motorcycle>) => Promise<{ success: boolean; message?: string }>;
-  updateMotorcycleKm: (id: string, newKm: number) => Promise<{ success: boolean; message?: string }>;
-  deleteMotorcycle: (id: string) => Promise<{ success: boolean; message?: string }>;
-  importMotorcyclesFromNfe: (items: ParsedNfeData[]) => Promise<{
-    success: boolean;
-    importedCount: number;
-    createdClientsCount: number;
-    errors: string[];
-  }>;
+  const [activeTab, setActiveTab] = useState<'loja' | 'usuarios' | 'permissoes' | 'erros' | 'auditoria' | 'dados'>('loja');
 
-  addPart: (part: Omit<Part, 'id' | 'createdAt'>) => Promise<{ success: boolean; part?: Part; message?: string }>;
-  updatePart: (id: string, updates: Partial<Part>) => Promise<{ success: boolean; message?: string }>;
-  deletePart: (id: string) => Promise<{ success: boolean; message?: string }>;
-  recalculateAllPartsPrices: (markupPercent?: number) => Promise<{ success: boolean; count: number; markup: number }>;
-  addStockEntry: (entry: {
-    partId: string;
-    quantity: number;
-    costUnit: number;
-    supplier?: string;
-    invoiceNumber?: string;
-    notes?: string;
-    updateSalePrice?: boolean;
-    customSalePrice?: number;
-  }) => Promise<{ success: boolean; message?: string }>;
-  addStockExit: (exit: {
-    partId: string;
-    quantity: number;
-    exitReason: StockExitReason;
-    serviceOrderId?: string;
-    notes?: string;
-  }) => Promise<{ success: boolean; message?: string }>;
+  const [permissionSuccessMsg, setPermissionSuccessMsg] = useState<string | null>(null);
 
-  addService: (
-    service: Omit<WorkshopService, 'id' | 'createdAt'>
-  ) => Promise<{ success: boolean; service?: WorkshopService; message?: string }>;
-  updateService: (id: string, updates: Partial<WorkshopService>) => Promise<{ success: boolean; message?: string }>;
-  deleteService: (id: string) => Promise<{ success: boolean; message?: string }>;
-
-  createServiceOrder: (
-    osData: Omit<ServiceOrder, 'id' | 'orderNumber' | 'stockDeducted' | 'openedAt'>
-  ) => Promise<{ success: boolean; order?: ServiceOrder; message?: string }>;
-  updateServiceOrder: (id: string, updates: Partial<ServiceOrder>) => Promise<{ success: boolean; message?: string }>;
-  changeServiceOrderStatus: (id: string, newStatus: ServiceOrderStatus) => Promise<{ success: boolean; message?: string }>;
-  deleteServiceOrder: (id: string) => Promise<{ success: boolean; message?: string }>;
-
-  registerCompletedRevision: (data: {
-    motorcycleId: string;
-    revisionNumber: number;
-    completedKm: number;
-    completedDate: string;
-    mechanicName?: string;
-    notes?: string;
-    serviceOrderId?: string;
-  }) => Promise<{ success: boolean; message?: string }>;
-
-  getMotorcycleNextRevision: (moto: Motorcycle) => {
-    revisionNumber: number;
-    targetKm: number;
-    maxDate: string;
-    status: RevisionStatus;
-  };
-  getClientById: (id: string) => Client | undefined;
-  getMotorcycleById: (id: string) => Motorcycle | undefined;
-  getPartById: (id: string) => Part | undefined;
-
-  markNotificationAsRead: (id: string) => Promise<void>;
-  markAllNotificationsAsRead: () => Promise<void>;
-  deleteNotification: (id: string) => Promise<void>;
-
-  updateSettings: (updates: Partial<StoreSettings>) => Promise<{ success: boolean; message?: string }>;
-  updateWarrantyRules: (rules: WarrantyRuleConfig) => Promise<{ success: boolean; message?: string }>;
-  resetDatabase: () => Promise<{ success: boolean; message?: string }>;
-  exportDatabaseJSON: () => string;
-  importDatabaseJSON: (jsonStr: string) => Promise<{ success: boolean; message?: string }>;
-
-  rolePermissions: RolePermission[];
-  canViewSection: (role: UserRole | undefined, sectionKey: SectionKey) => boolean;
-  updateRolePermission: (role: UserRole, sectionKey: SectionKey, canView: boolean) => Promise<{ success: boolean; message?: string }>;
-}
-
-const StoreContext = createContext<StoreContextType | undefined>(undefined);
-
-const DEFAULT_SETTINGS: StoreSettings = {
-  storeName: '',
-  legalName: '',
-  cnpj: '',
-  phone: '',
-  whatsapp: '',
-  email: '',
-  cep: '',
-  address: '',
-  number: '',
-  neighborhood: '',
-  city: '',
-  state: '',
-  warrantyRules: DEFAULT_WARRANTY_RULES,
-  defaultMarkupPercent: 40,
-  autoApplyMarkup: true,
-};
-
-export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser, isAuthenticated } = useAuth();
-
-  const [clients, setClients] = useState<Client[]>([]);
-  const [motorcycles, setMotorcycles] = useState<Motorcycle[]>([]);
-  const [parts, setParts] = useState<Part[]>([]);
-  const [services, setServices] = useState<WorkshopService[]>([]);
-  const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>([]);
-  const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
-  const [warrantyRevisions, setWarrantyRevisions] = useState<WarrantyRevision[]>([]);
-  const [notifications, setNotifications] = useState<SystemNotification[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [settings, setSettings] = useState<StoreSettings>(DEFAULT_SETTINGS);
-  const [errorReports, setErrorReports] = useState<ErrorReport[]>([]);
-  const [rolePermissions, setRolePermissions] = useState<RolePermission[]>([]);
-  const [isDataReady, setIsDataReady] = useState(false);
-
-  const currentUserRef = useRef(currentUser);
-  useEffect(() => {
-    currentUserRef.current = currentUser;
-  }, [currentUser]);
-
-  const pendingErrorReportsCount = errorReports.filter(
-    (e) => e.status === 'PENDENTE' || e.status === 'EM_ANALISE'
-  ).length;
-
-  // ---------- Fetch helpers (initial load + realtime "refetch this slice") ----------
-  const refetchClients = async () => {
-    const { data } = await supabase.from('clients').select('*').order('created_at', { ascending: false });
-    if (data) setClients(data.map(clientFromRow));
-  };
-  const refetchMotorcycles = async () => {
-    const { data } = await supabase.from('motorcycles').select('*').order('created_at', { ascending: false });
-    if (data) setMotorcycles(data.map(motorcycleFromRow));
-  };
-  const refetchParts = async () => {
-    const { data } = await supabase.from('parts').select('*').order('name', { ascending: true });
-    if (data) setParts(data.map(partFromRow));
-  };
-  const refetchServices = async () => {
-    const { data } = await supabase.from('workshop_services').select('*').order('created_at', { ascending: false });
-    if (data) setServices(data.map(serviceFromRow));
-  };
-  const refetchServiceOrders = async () => {
-    const { data } = await supabase
-      .from('service_orders')
-      .select('*, service_order_services(*), service_order_parts(*)')
-      .order('opened_at', { ascending: false });
-    if (data) setServiceOrders(data.map(serviceOrderFromRow));
-  };
-  const refetchStockMovements = async () => {
-    const { data } = await supabase.from('stock_movements').select('*').order('date', { ascending: false }).limit(1000);
-    if (data) setStockMovements(data.map(stockMovementFromRow));
-  };
-  const refetchWarrantyRevisions = async () => {
-    const { data } = await supabase.from('warranty_revisions').select('*').order('created_at', { ascending: false });
-    if (data) setWarrantyRevisions(data.map(warrantyRevisionFromRow));
-  };
-  const refetchNotifications = async () => {
-    const { data } = await supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(300);
-    if (data) setNotifications(data.map(notificationFromRow));
-  };
-  const refetchAuditLogs = async () => {
-    const { data } = await supabase.from('audit_logs').select('*').order('timestamp', { ascending: false }).limit(1000);
-    if (data) setAuditLogs(data.map(auditLogFromRow));
-  };
-  const refetchSettings = async () => {
-    const { data } = await supabase.from('store_settings').select('*').eq('id', 1).single();
-    if (data) setSettings(settingsFromRow(data));
-  };
-  const refetchErrorReports = async () => {
-    const { data } = await supabase.from('error_reports').select('*').order('created_at', { ascending: false });
-    if (data) setErrorReports(data.map(errorReportFromRow));
-  };
-  const refetchRolePermissions = async () => {
-    const { data } = await supabase.from('role_permissions').select('*');
-    if (data) setRolePermissions(data.map(rolePermissionFromRow));
-  };
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setClients([]);
-      setMotorcycles([]);
-      setParts([]);
-      setServices([]);
-      setServiceOrders([]);
-      setStockMovements([]);
-      setWarrantyRevisions([]);
-      setNotifications([]);
-      setAuditLogs([]);
-      setSettings(DEFAULT_SETTINGS);
-      setErrorReports([]);
-      setRolePermissions([]);
-      setIsDataReady(false);
-      return;
-    }
-
-    let active = true;
-    (async () => {
-      await Promise.all([
-        refetchClients(),
-        refetchMotorcycles(),
-        refetchParts(),
-        refetchServices(),
-        refetchServiceOrders(),
-        refetchStockMovements(),
-        refetchWarrantyRevisions(),
-        refetchNotifications(),
-        refetchAuditLogs(),
-        refetchSettings(),
-        refetchErrorReports(),
-        refetchRolePermissions(),
-      ]);
-      if (active) setIsDataReady(true);
-    })();
-
-    // Realtime: a change made by ANY user on ANY device refreshes the
-    // relevant slice here - this is what solves the "each browser has its
-    // own copy" limitation of the original localStorage version.
-    const channel = supabase
-      .channel('store-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, refetchClients)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'motorcycles' }, refetchMotorcycles)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'parts' }, refetchParts)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'workshop_services' }, refetchServices)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'service_orders' }, refetchServiceOrders)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'service_order_services' }, refetchServiceOrders)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'service_order_parts' }, refetchServiceOrders)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_movements' }, refetchStockMovements)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'warranty_revisions' }, refetchWarrantyRevisions)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, refetchNotifications)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_logs' }, refetchAuditLogs)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'store_settings' }, refetchSettings)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'error_reports' }, refetchErrorReports)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'role_permissions' }, refetchRolePermissions)
-      .subscribe();
-
-    return () => {
-      active = false;
-      supabase.removeChannel(channel);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated]);
-
-  // ---------- Shared helpers ----------
-  const logAudit = async (action: string, details: string, affectedEntity: string, entityId?: string) => {
-    await supabase.from('audit_logs').insert({
-      user_id: currentUserRef.current?.id || null,
-      user_name: currentUserRef.current?.name || 'Sistema',
-      action,
-      details,
-      affected_entity: affectedEntity,
-      entity_id: entityId || null,
-    });
-  };
-
-  const addNotification = async (
-    title: string,
-    message: string,
-    type: SystemNotification['type'],
-    linkTarget?: string,
-    linkId?: string
-  ) => {
-    await supabase.from('notifications').insert({
-      title,
-      message,
-      type,
-      link_target: linkTarget || null,
-      link_id: linkId || null,
-    });
-  };
-
-  const getMotorcycleNextRevision = (moto: Motorcycle) => {
-    return computeNextScheduledRevision(moto, warrantyRevisions, settings.warrantyRules);
-  };
-
-  const getClientById = (id: string) => clients.find((c) => c.id === id);
-  const getMotorcycleById = (id: string) => motorcycles.find((m) => m.id === id);
-  const getPartById = (id: string) => parts.find((p) => p.id === id);
-
-  // Admin always sees everything, regardless of what's configured in
-  // role_permissions - this table only controls the OTHER roles, and
-  // defaults to visible (true) if a role/section combination has no row
-  // yet, so newly added sections don't silently disappear for everyone.
-  const canViewSection = (role: UserRole | undefined, sectionKey: SectionKey): boolean => {
-    if (!role) return false;
-    if (role === 'admin') return true;
-    const found = rolePermissions.find((p) => p.role === role && p.sectionKey === sectionKey);
+  const isSectionCheckedForRole = (role: UserRole, section: SectionKey): boolean => {
+    const found = rolePermissions.find((p) => p.role === role && p.sectionKey === section);
     return found ? found.canView : true;
   };
 
-  // ---------- CLIENTS ----------
-  const addClient = async (clientData: Omit<Client, 'id' | 'createdAt'>) => {
-    const row = clientToRow(clientData);
-    row.created_by = currentUserRef.current?.id || null;
-    const { data, error } = await supabase.from('clients').insert(row).select().single();
-    if (error || !data) return { success: false, message: error?.message || 'Erro ao cadastrar cliente.' };
-    const newClient = clientFromRow(data);
-    await logAudit('Cadastro de Cliente', `Cadastrou o cliente ${newClient.name} (CPF/CNPJ: ${newClient.cpfCnpj})`, 'Clientes', newClient.id);
-    return { success: true, client: newClient };
-  };
-
-  const updateClient = async (id: string, updates: Partial<Client>) => {
-    const { error } = await supabase.from('clients').update(clientToRow(updates)).eq('id', id);
-    if (error) return { success: false, message: error.message };
-    await logAudit('Edição de Cliente', `Atualizou dados cadastrais do cliente ID: ${id}`, 'Clientes', id);
-    return { success: true };
-  };
-
-  const deleteClient = async (id: string) => {
-    const hasBikes = motorcycles.some((m) => m.clientId === id);
-    if (hasBikes) {
-      return {
-        success: false,
-        message: 'Não é possível excluir o cliente pois existem motocicletas vinculadas a ele. Transfira ou exclua as motos primeiro.',
-      };
+  const handleTogglePermission = async (role: UserRole, section: SectionKey, currentlyChecked: boolean) => {
+    const nextValue = !currentlyChecked;
+    await updateRolePermission(role, section, nextValue);
+    // 'staff' is a legacy alias for 'recepcionista' - keep both in sync so
+    // older accounts created under that role name behave the same way.
+    if (role === 'recepcionista') {
+      await updateRolePermission('staff' as UserRole, section, nextValue);
     }
-    const hasOS = serviceOrders.some((os) => os.clientId === id);
-    if (hasOS) {
-      return {
-        success: false,
-        message: 'Não é possível excluir o cliente pois existem Ordens de Serviço registradas em seu nome.',
-      };
-    }
-    const client = getClientById(id);
-    const { error } = await supabase.from('clients').delete().eq('id', id);
-    if (error) return { success: false, message: error.message };
-    await logAudit('Exclusão de Cliente', `Excluiu o cliente ${client?.name || id}`, 'Clientes', id);
-    return { success: true };
-  };
-
-  // ---------- MOTORCYCLES ----------
-  const addMotorcycle = async (motoData: Omit<Motorcycle, 'id' | 'createdAt'>) => {
-    const cleanPlate = motoData.plate.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-    const plateExists = motorcycles.some(
-      (m) => m.plate.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() === cleanPlate
+    const roleLabel = PERMISSION_ROLES.find((r) => r.key === role)?.label || role;
+    const sectionLabel = PERMISSION_SECTIONS.find((s) => s.key === section)?.label || section;
+    setPermissionSuccessMsg(
+      `${nextValue ? 'Acesso concedido' : 'Acesso removido'}: ${roleLabel} → ${sectionLabel}`
     );
-    if (plateExists) {
-      return { success: false, message: `Já existe uma motocicleta cadastrada com a placa ${motoData.plate}.` };
-    }
-
-    const row = motorcycleToRow({ ...motoData, brand: 'Shineray', plate: cleanPlate });
-    row.created_by = currentUserRef.current?.id || null;
-
-    const { data, error } = await supabase.from('motorcycles').insert(row).select().single();
-    if (error) {
-      if (error.code === '23505') {
-        return { success: false, message: `Já existe uma motocicleta cadastrada com esta placa ou chassi.` };
-      }
-      return { success: false, message: error.message };
-    }
-    const newMoto = motorcycleFromRow(data);
-
-    const client = getClientById(newMoto.clientId);
-    await logAudit('Venda / Cadastro de Moto', `Registrou a moto ${newMoto.brand} ${newMoto.model} (Placa: ${newMoto.plate}) para ${client?.name || 'Cliente'}`, 'Motos', newMoto.id);
-
-    const nextRev = computeNextScheduledRevision(newMoto, [], settings.warrantyRules);
-    if (nextRev.status === 'PROXIMA' || nextRev.status === 'VENCENDO') {
-      await addNotification(
-        'Revisão Próxima',
-        `${newMoto.brand} ${newMoto.model} (${newMoto.plate}) tem revisão prevista para ${nextRev.targetKm} km até ${nextRev.maxDate}.`,
-        'REVISAO_PROXIMA',
-        'revisoes',
-        newMoto.id
-      );
-    }
-
-    return { success: true, motorcycle: newMoto };
+    setTimeout(() => setPermissionSuccessMsg(null), 3000);
   };
 
-  const updateMotorcycle = async (id: string, updates: Partial<Motorcycle>) => {
-    const { error } = await supabase.from('motorcycles').update(motorcycleToRow(updates)).eq('id', id);
-    if (error) return { success: false, message: error.message };
-    await logAudit('Edição de Moto', `Atualizou informações da moto ID: ${id}`, 'Motos', id);
-    return { success: true };
+  // Store settings form state
+  const [storeName, setStoreName] = useState(settings.storeName || '');
+  const [legalName, setLegalName] = useState(settings.legalName || '');
+  const [cnpj, setCnpj] = useState(settings.cnpj || '');
+  const [phone, setPhone] = useState(settings.phone || '');
+  const [whatsapp, setWhatsapp] = useState(settings.whatsapp || '');
+  const [email, setEmail] = useState(settings.email || '');
+  const [address, setAddress] = useState(settings.address || '');
+  const [number, setNumber] = useState(settings.number || '');
+  const [neighborhood, setNeighborhood] = useState(settings.neighborhood || '');
+  const [city, setCity] = useState(settings.city || '');
+  const [state, setState] = useState(settings.state || '');
+
+  // Warranty rules form state
+  const [skipFirst1000Km, setSkipFirst1000Km] = useState(settings.warrantyRules.skipFirst1000Km || false);
+  const [firstRevisionKm, setFirstRevisionKm] = useState(settings.warrantyRules.firstRevisionKm || 1000);
+  const [subsequentIntervalKm, setSubsequentIntervalKm] = useState(settings.warrantyRules.subsequentIntervalKm || 3000);
+  const [intervalMonths, setIntervalMonths] = useState(settings.warrantyRules.intervalMonths || 6);
+  const [alertDaysTolerance, setAlertDaysTolerance] = useState(settings.warrantyRules.alertDaysTolerance || 30);
+  const [alertKmTolerance, setAlertKmTolerance] = useState(settings.warrantyRules.alertKmTolerance || 500);
+
+  // Parts automatic pricing state
+  const [defaultMarkupPercent, setDefaultMarkupPercent] = useState(settings.defaultMarkupPercent ?? 40);
+  const [autoApplyMarkup, setAutoApplyMarkup] = useState(settings.autoApplyMarkup !== false);
+  const [recalcSuccessMsg, setRecalcSuccessMsg] = useState<string | null>(null);
+
+  const [savedSuccess, setSavedSuccess] = useState(false);
+
+  // User form modal
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPhone, setNewUserPhone] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('123456');
+  const [newUserRole, setNewUserRole] = useState<UserRole>('vendedor');
+  const [userToDelete, setUserToDelete] = useState<string | null>(null);
+
+  // Approval override role map
+  const [approvalRoleOverrides, setApprovalRoleOverrides] = useState<Record<string, UserRole>>({});
+  const [rejectingUserId, setRejectingUserId] = useState<string | null>(null);
+  const [rejectionReasonInput, setRejectionReasonInput] = useState('');
+
+  // Reset confirmation
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await updateSettings({
+      storeName,
+      legalName,
+      cnpj,
+      phone,
+      whatsapp,
+      email,
+      address,
+      number,
+      neighborhood,
+      city,
+      state,
+      warrantyRules: {
+        skipFirst1000Km,
+        firstRevisionKm: Number(firstRevisionKm),
+        subsequentIntervalKm: Number(subsequentIntervalKm),
+        intervalMonths: Number(intervalMonths),
+        alertDaysTolerance: Number(alertDaysTolerance),
+        alertKmTolerance: Number(alertKmTolerance),
+      },
+      defaultMarkupPercent: Number(defaultMarkupPercent),
+      autoApplyMarkup,
+    });
+    setSavedSuccess(true);
+    setTimeout(() => setSavedSuccess(false), 3000);
   };
 
-  const updateMotorcycleKm = async (id: string, newKm: number) => {
-    const moto = getMotorcycleById(id);
-    if (!moto) return { success: false, message: 'Moto não encontrada.' };
-    const resolvedKm = Math.max(moto.currentKm, newKm);
+  const handleRecalculatePrices = async () => {
+    const res = await recalculateAllPartsPrices(Number(defaultMarkupPercent));
+    setRecalcSuccessMsg(`Preços de venda de ${res.count} peça(s) atualizados com sucesso com margem de ${res.markup}%!`);
+    setTimeout(() => setRecalcSuccessMsg(null), 4000);
+  };
 
-    const { error } = await supabase.from('motorcycles').update({ current_km: resolvedKm }).eq('id', id);
-    if (error) return { success: false, message: error.message };
+  const [addUserError, setAddUserError] = useState<string | null>(null);
+  const [isAddingUser, setIsAddingUser] = useState(false);
 
-    const updated = { ...moto, currentKm: resolvedKm };
-    const nextRev = computeNextScheduledRevision(updated, warrantyRevisions, settings.warrantyRules);
-    if (nextRev.status === 'ATRASADA') {
-      await addNotification(
-        'Revisão Atrasada por KM',
-        `${updated.brand} ${updated.model} (${updated.plate}) atingiu ${newKm} km e ultrapassou a revisão de ${nextRev.targetKm} km.`,
-        'REVISAO_ATRASADA',
-        'revisoes',
-        updated.id
-      );
-    } else if (nextRev.status === 'PROXIMA' || nextRev.status === 'VENCENDO') {
-      await addNotification(
-        'Revisão Próxima por KM',
-        `${updated.brand} ${updated.model} (${updated.plate}) está com ${newKm} km, próxima da revisão de ${nextRev.targetKm} km.`,
-        'REVISAO_PROXIMA',
-        'revisoes',
-        updated.id
-      );
+  const handleAddUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUserName.trim() || !newUserEmail.trim()) return;
+
+    setAddUserError(null);
+    setIsAddingUser(true);
+    const res = await addUser({
+      name: newUserName.trim(),
+      email: newUserEmail.trim(),
+      phone: newUserPhone.trim(),
+      role: newUserRole,
+      password: newUserPassword.trim() || '123456',
+    });
+    setIsAddingUser(false);
+
+    if (!res.success) {
+      setAddUserError(res.message || 'Não foi possível criar o usuário.');
+      return;
     }
 
-    await logAudit('Atualização de KM', `Atualizou quilometragem da moto ID: ${id} para ${newKm} km`, 'Motos', id);
-    return { success: true };
+    setNewUserName('');
+    setNewUserEmail('');
+    setNewUserPhone('');
+    setNewUserPassword('123456');
+    setIsUserModalOpen(false);
   };
 
-  const deleteMotorcycle = async (id: string) => {
-    const hasOS = serviceOrders.some((os) => os.motorcycleId === id);
-    if (hasOS) {
-      return { success: false, message: 'Não é possível excluir a moto pois existem Ordens de Serviço vinculadas.' };
-    }
-    const moto = getMotorcycleById(id);
-    const { error } = await supabase.from('motorcycles').delete().eq('id', id);
-    if (error) return { success: false, message: error.message };
-    await logAudit('Exclusão de Moto', `Excluiu a moto ${moto?.brand} ${moto?.model} (${moto?.plate})`, 'Motos', id);
-    return { success: true };
+  const handleApprove = async (userId: string) => {
+    const roleOverride = approvalRoleOverrides[userId];
+    await approveUser(userId, roleOverride);
   };
 
-  const importMotorcyclesFromNfe = async (items: ParsedNfeData[]) => {
-    let importedCount = 0;
-    let createdClientsCount = 0;
-    const errors: string[] = [];
+  const handleRejectConfirm = async () => {
+    if (!rejectingUserId) return;
+    await rejectUser(rejectingUserId, rejectionReasonInput.trim() || 'Solicitação recusada pelo Administrador.');
+    setRejectingUserId(null);
+    setRejectionReasonInput('');
+  };
 
-    const currentClients = [...clients];
-    const currentMotos = [...motorcycles];
+  const handleExportJSON = () => {
+    const jsonString = exportDatabaseJSON();
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `backup_vittamotos_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
-    for (const item of items) {
-      if (!item.selected) continue;
+  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-      try {
-        const cleanCpf = item.client.cpfCnpj.replace(/\D/g, '');
-        let targetClient = currentClients.find(
-          (c) => c.cpfCnpj.replace(/\D/g, '') === cleanCpf && cleanCpf.length > 0
-        );
-        if (!targetClient) {
-          targetClient = currentClients.find(
-            (c) => c.name.trim().toLowerCase() === item.client.name.trim().toLowerCase()
-          );
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        const res = await importDatabaseJSON(content);
+        if (res.success) {
+          alert('Backup restaurado com sucesso!');
+        } else {
+          alert('Falha ao restaurar o backup: ' + (res.message || 'Arquivo JSON inválido.'));
         }
-
-        let clientId = targetClient?.id;
-
-        if (!targetClient) {
-          const res = await addClient({
-            name: item.client.name.toUpperCase(),
-            cpfCnpj: item.client.cpfCnpj,
-            phone: item.client.phone,
-            whatsapp: item.client.phone,
-            email: item.client.email,
-            cep: item.client.cep,
-            address: item.client.address,
-            number: item.client.number,
-            complement: item.client.complement,
-            neighborhood: item.client.neighborhood,
-            city: item.client.city,
-            state: item.client.state,
-            notes: `Cadastrado automaticamente via importação da NF-e ${item.invoiceNumber}`,
-          });
-          if (!res.success || !res.client) {
-            errors.push(`Erro ao criar cliente para "${item.vehicle.model}": ${res.message}`);
-            continue;
-          }
-          currentClients.push(res.client);
-          clientId = res.client.id;
-          createdClientsCount++;
-        }
-
-        const cleanPlate = item.vehicle.plate.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-        const cleanChassis = item.vehicle.chassis.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-        const exists = currentMotos.some(
-          (m) =>
-            (m.plate.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() === cleanPlate && cleanPlate.length > 0) ||
-            (m.chassis.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() === cleanChassis && cleanChassis.length > 0)
-        );
-        if (exists) {
-          errors.push(`A moto modelo "${item.vehicle.model}" (Chassi: ${item.vehicle.chassis} / Placa: ${item.vehicle.plate}) já está cadastrada no sistema.`);
-          continue;
-        }
-
-        const billingDate = item.invoiceDate || new Date().toISOString().split('T')[0];
-        const warrantyStartDate = item.warrantyConfig?.startDate || billingDate;
-
-        const res = await addMotorcycle({
-          clientId: clientId!,
-          brand: item.vehicle.brand || 'Shineray',
-          model: item.vehicle.model,
-          year: item.vehicle.year || new Date().getFullYear(),
-          color: item.vehicle.color || 'Padrão',
-          chassis: cleanChassis,
-          engineNumber: item.vehicle.engineNumber || '',
-          plate: cleanPlate,
-          renavam: item.vehicle.renavam || '',
-          deliveryKm: 0,
-          currentKm: 0,
-          saleDate: billingDate,
-          warrantyStartDate,
-          invoiceNumber: item.invoiceNumber,
-          nfeKey: item.accessKey,
-          nfeValue: item.totalInvoiceValue,
-          warrantyPlanMonths: item.warrantyConfig?.planMonths || 24,
-          notes: `Importado via NF-e ${item.invoiceNumber} (Série ${item.series || '1'}) com faturamento em ${billingDate}. Garantia Shineray de ${item.warrantyConfig?.planMonths || 24} meses configurada a partir da data de faturamento.`,
-        });
-
-        if (!res.success || !res.motorcycle) {
-          errors.push(`Erro ao importar item ${item.invoiceNumber}: ${res.message}`);
-          continue;
-        }
-        currentMotos.push(res.motorcycle);
-        importedCount++;
-      } catch (err: any) {
-        errors.push(`Erro ao importar item ${item.invoiceNumber}: ${err?.message || 'Erro desconhecido'}`);
       }
-    }
-
-    if (importedCount > 0) {
-      await logAudit(
-        'Importação de NF-e',
-        `Importou ${importedCount} motos vendidas via Notas Fiscais com configuração automática de garantia (${createdClientsCount} novos clientes cadastrados).`,
-        'Motos'
-      );
-    }
-
-    return { success: importedCount > 0, importedCount, createdClientsCount, errors };
-  };  // ---------- PARTS & INVENTORY ----------
-  const addPart = async (partData: Omit<Part, 'id' | 'createdAt'>) => {
-    const skuExists = parts.some((p) => p.sku.toLowerCase().trim() === partData.sku.toLowerCase().trim());
-    if (skuExists) {
-      return { success: false, message: `Já existe uma peça com o código SKU "${partData.sku}".` };
-    }
-
-    const { data, error } = await supabase.from('parts').insert(partToRow(partData)).select().single();
-    if (error) {
-      if (error.code === '23505') {
-        return { success: false, message: `Já existe uma peça com o código SKU "${partData.sku}".` };
-      }
-      return { success: false, message: error.message };
-    }
-    const newPart = partFromRow(data);
-
-    if (newPart.currentStock > 0) {
-      await supabase.from('stock_movements').insert({
-        part_id: newPart.id,
-        type: 'ENTRADA',
-        quantity: newPart.currentStock,
-        previous_stock: 0,
-        resulting_stock: newPart.currentStock,
-        cost_unit: newPart.purchaseCost,
-        total_cost: newPart.purchaseCost * newPart.currentStock,
-        supplier: newPart.supplier,
-        invoice_number: 'CADASTRO_INICIAL',
-        user_id: currentUserRef.current?.id || null,
-        user_name: currentUserRef.current?.name || 'Sistema',
-        notes: 'Estoque inicial cadastrado',
-      });
-    }
-
-    await logAudit('Cadastro de Peça', `Cadastrou a peça ${newPart.name} (${newPart.sku})`, 'Estoque', newPart.id);
-    return { success: true, part: newPart };
-  };
-
-  const updatePart = async (id: string, updates: Partial<Part>) => {
-    const { error } = await supabase.from('parts').update(partToRow(updates)).eq('id', id);
-    if (error) return { success: false, message: error.message };
-    // Low-stock notification is handled server-side by trg_notify_low_stock.
-    await logAudit('Edição de Peça', `Atualizou a peça ID: ${id}`, 'Estoque', id);
-    return { success: true };
-  };
-
-  const deletePart = async (id: string) => {
-    const hasMovements = stockMovements.some((m) => m.partId === id);
-    const hasInOS = serviceOrders.some((os) => os.parts.some((p) => p.partId === id));
-    if (hasInOS || hasMovements) {
-      const { error } = await supabase.from('parts').update({ active: false }).eq('id', id);
-      if (error) return { success: false, message: error.message };
-      await logAudit('Desativação de Peça', `Desativou a peça ID: ${id} (possui histórico)`, 'Estoque', id);
-      return { success: true, message: 'A peça possui histórico de movimentação/OS e foi marcada como INATIVA.' };
-    }
-
-    const { error } = await supabase.from('parts').delete().eq('id', id);
-    if (error) return { success: false, message: error.message };
-    await logAudit('Exclusão de Peça', `Excluiu a peça ID: ${id}`, 'Estoque', id);
-    return { success: true };
-  };
-
-  const recalculateAllPartsPrices = async (markupPercent?: number) => {
-    const markup = markupPercent ?? settings.defaultMarkupPercent ?? 40;
-    const toUpdate = parts.filter((p) => p.purchaseCost > 0);
-    await Promise.all(
-      toUpdate.map((p) => {
-        const newSalePrice = Math.round(p.purchaseCost * (1 + markup / 100) * 100) / 100;
-        return supabase.from('parts').update({ sale_price: newSalePrice }).eq('id', p.id);
-      })
-    );
-    await logAudit(
-      'Precificação Automática',
-      `Recalculou preços de venda de ${toUpdate.length} peça(s) no estoque com margem de ${markup}%`,
-      'Estoque'
-    );
-    return { success: true, count: toUpdate.length, markup };
-  };
-
-  const addStockEntry = async (entry: {
-    partId: string;
-    quantity: number;
-    costUnit: number;
-    supplier?: string;
-    invoiceNumber?: string;
-    notes?: string;
-    updateSalePrice?: boolean;
-    customSalePrice?: number;
-  }) => {
-    const part = getPartById(entry.partId);
-    if (!part) return { success: false, message: 'Peça não encontrada.' };
-
-    let newSalePrice: number | undefined;
-    if (entry.customSalePrice !== undefined && entry.customSalePrice > 0) {
-      newSalePrice = entry.customSalePrice;
-    } else if (entry.updateSalePrice && entry.costUnit > 0) {
-      const markup = settings.defaultMarkupPercent || 40;
-      newSalePrice = Math.round(entry.costUnit * (1 + markup / 100) * 100) / 100;
-    }
-
-    const { error } = await supabase.rpc('add_stock_entry', {
-      p_part_id: entry.partId,
-      p_quantity: entry.quantity,
-      p_cost_unit: entry.costUnit,
-      p_supplier: entry.supplier || part.supplier,
-      p_invoice_number: entry.invoiceNumber || null,
-      p_notes: entry.notes || null,
-      p_new_sale_price: newSalePrice ?? null,
-    });
-    if (error) return { success: false, message: error.message };
-
-    await refetchParts();
-    await refetchStockMovements();
-    await logAudit('Entrada de Estoque', `Entrada de ${entry.quantity} ${part.unit} de "${part.name}" (NF: ${entry.invoiceNumber || '-'})`, 'Estoque', entry.partId);
-    return { success: true };
-  };
-
-  const addStockExit = async (exit: {
-    partId: string;
-    quantity: number;
-    exitReason: StockExitReason;
-    serviceOrderId?: string;
-    notes?: string;
-  }) => {
-    const part = getPartById(exit.partId);
-    if (!part) return { success: false, message: 'Peça não encontrada.' };
-
-    const { error } = await supabase.rpc('add_stock_exit', {
-      p_part_id: exit.partId,
-      p_quantity: exit.quantity,
-      p_exit_reason: exit.exitReason,
-      p_service_order_id: exit.serviceOrderId || null,
-      p_notes: exit.notes || null,
-    });
-    if (error) return { success: false, message: error.message };
-
-    await refetchParts();
-    await refetchStockMovements();
-    await logAudit('Saída de Estoque', `Saída de ${exit.quantity} ${part.unit} de "${part.name}" (Motivo: ${exit.exitReason})`, 'Estoque', exit.partId);
-    return { success: true };
-  };
-
-  // ---------- SERVICES CATALOG ----------
-  const addService = async (srvData: Omit<WorkshopService, 'id' | 'createdAt'>) => {
-    const { data, error } = await supabase.from('workshop_services').insert(serviceToRow(srvData)).select().single();
-    if (error) return { success: false, message: error.message };
-    const newSrv = serviceFromRow(data);
-    await logAudit('Cadastro de Serviço', `Cadastrou o serviço "${newSrv.name}"`, 'Serviços', newSrv.id);
-    return { success: true, service: newSrv };
-  };
-
-  const updateService = async (id: string, updates: Partial<WorkshopService>) => {
-    const { error } = await supabase.from('workshop_services').update(serviceToRow(updates)).eq('id', id);
-    if (error) return { success: false, message: error.message };
-    await logAudit('Edição de Serviço', `Atualizou serviço ID: ${id}`, 'Serviços', id);
-    return { success: true };
-  };
-
-  const deleteService = async (id: string) => {
-    const { error } = await supabase.from('workshop_services').delete().eq('id', id);
-    if (error) return { success: false, message: error.message };
-    await logAudit('Exclusão de Serviço', `Excluiu o serviço ID: ${id}`, 'Serviços', id);
-    return { success: true };
-  };
-
-  // ---------- SERVICE ORDERS ----------
-  const createServiceOrder = async (
-    osData: Omit<ServiceOrder, 'id' | 'orderNumber' | 'stockDeducted' | 'openedAt'>
-  ) => {
-    const moto = getMotorcycleById(osData.motorcycleId);
-    if (moto && osData.currentKm > moto.currentKm) {
-      await updateMotorcycleKm(moto.id, osData.currentKm);
-    }
-
-    const { data: orderId, error } = await supabase.rpc('create_service_order', {
-      p_client_id: osData.clientId,
-      p_motorcycle_id: osData.motorcycleId,
-      p_current_km: osData.currentKm,
-      p_service_type: osData.serviceType,
-      p_entry_reason: osData.entryReason,
-      p_reported_problem: osData.reportedProblem || null,
-      p_diagnosis: osData.diagnosis || null,
-      p_notes: osData.notes || null,
-      p_mechanic_name: osData.mechanicName,
-      p_seller_id: osData.sellerId || null,
-      p_seller_name: osData.sellerName || null,
-      p_status: osData.status,
-      p_services: osData.services || [],
-      p_parts: osData.parts || [],
-      p_services_total: osData.servicesTotal,
-      p_parts_total: osData.partsTotal,
-      p_general_discount: osData.generalDiscount,
-      p_payment_method: osData.paymentMethod || null,
-      p_final_total: osData.finalTotal,
-      p_opened_at: osData.openedAt || new Date().toISOString(),
-      p_estimated_completion_at: osData.estimatedCompletionAt || null,
-      p_finished_at: osData.finishedAt || null,
-      p_delivered_at: osData.deliveredAt || null,
-    });
-
-    if (error) return { success: false, message: error.message };
-
-    await refetchServiceOrders();
-    await refetchParts();
-    await refetchStockMovements();
-    await refetchWarrantyRevisions();
-    await refetchMotorcycles();
-
-    const { data: orderRow } = await supabase
-      .from('service_orders')
-      .select('*, service_order_services(*), service_order_parts(*)')
-      .eq('id', orderId)
-      .single();
-    const newOrder = orderRow ? serviceOrderFromRow(orderRow) : undefined;
-
-    const client = getClientById(osData.clientId);
-    await logAudit('Abertura de OS', `Abriu a ordem de serviço ${newOrder?.orderNumber || ''} para ${client?.name || 'Cliente'} (${osData.serviceType})`, 'Ordens de Serviço', orderId);
-
-    return { success: true, order: newOrder };
-  };
-
-  const updateServiceOrder = async (id: string, updates: Partial<ServiceOrder>) => {
-    const existing = serviceOrders.find((os) => os.id === id);
-    if (!existing) return { success: false, message: 'OS não encontrada.' };
-
-    const row = serviceOrderToRow(updates);
-
-    if (row.status === 'FINALIZADA' && !updates.finishedAt) row.finished_at = new Date().toISOString();
-    if (row.status === 'ENTREGUE') {
-      if (!updates.finishedAt) row.finished_at = existing.finishedAt || new Date().toISOString();
-      if (!updates.deliveredAt) row.delivered_at = new Date().toISOString();
-    }
-
-    const { error: updateErr } = await supabase.from('service_orders').update(row).eq('id', id);
-    if (updateErr) return { success: false, message: updateErr.message };
-
-    if (updates.services) {
-      await supabase.from('service_order_services').delete().eq('service_order_id', id);
-      if (updates.services.length > 0) {
-        await supabase.from('service_order_services').insert(updates.services.map((s) => osServiceItemToRow(s, id)));
-      }
-    }
-    if (updates.parts) {
-      await supabase.from('service_order_parts').delete().eq('service_order_id', id);
-      if (updates.parts.length > 0) {
-        await supabase.from('service_order_parts').insert(updates.parts.map((p) => osPartItemToRow(p, id)));
-      }
-    }
-
-    const newStatus = updates.status || existing.status;
-    if ((newStatus === 'FINALIZADA' || newStatus === 'ENTREGUE') && !existing.stockDeducted) {
-      const { error: deductErr } = await supabase.rpc('execute_stock_deduction_for_os', { p_order_id: id });
-      if (deductErr) {
-        return { success: false, message: deductErr.message };
-      }
-    }
-
-    await refetchServiceOrders();
-    await refetchParts();
-    await refetchStockMovements();
-
-    await logAudit('Edição de OS', `Atualizou a OS ${existing.orderNumber}`, 'Ordens de Serviço', id);
-    return { success: true };
-  };
-
-  const changeServiceOrderStatus = async (id: string, newStatus: ServiceOrderStatus) => {
-    const existing = serviceOrders.find((os) => os.id === id);
-    if (!existing) return { success: false, message: 'OS não encontrada.' };
-    if (existing.status === newStatus) return { success: true };
-
-    const { error } = await supabase.rpc('change_service_order_status', {
-      p_order_id: id,
-      p_new_status: newStatus,
-    });
-    if (error) return { success: false, message: error.message };
-
-    await refetchServiceOrders();
-    await refetchParts();
-    await refetchStockMovements();
-    await refetchWarrantyRevisions();
-    await refetchMotorcycles();
-
-    await addNotification(
-      'Status de OS Alterado',
-      `${existing.orderNumber} teve o status alterado para "${newStatus}".`,
-      'OS_STATUS',
-      'ordens',
-      id
-    );
-    await logAudit('Status de OS Alterado', `Alterou status da ${existing.orderNumber} de ${existing.status} para ${newStatus}`, 'Ordens de Serviço', id);
-    return { success: true };
-  };
-
-  const deleteServiceOrder = async (id: string) => {
-    const os = serviceOrders.find((o) => o.id === id);
-    if (!os) return { success: false, message: 'OS não encontrada.' };
-    if (os.status === 'FINALIZADA' || os.status === 'ENTREGUE') {
-      return {
-        success: false,
-        message: 'Não é possível excluir uma Ordem de Serviço já finalizada/entregue. Altere para Cancelada se necessário.',
-      };
-    }
-    const { error } = await supabase.from('service_orders').delete().eq('id', id);
-    if (error) return { success: false, message: error.message };
-    await logAudit('Exclusão de OS', `Excluiu a ${os.orderNumber}`, 'Ordens de Serviço', id);
-    return { success: true };
-  };  // ---------- WARRANTY REVISIONS ----------
-  const registerCompletedRevision = async (data: {
-    motorcycleId: string;
-    revisionNumber: number;
-    completedKm: number;
-    completedDate: string;
-    mechanicName?: string;
-    notes?: string;
-    serviceOrderId?: string;
-  }) => {
-    const moto = getMotorcycleById(data.motorcycleId);
-    if (!moto) return { success: false, message: 'Moto não encontrada.' };
-
-    const targetKm = computeNextScheduledRevision(moto, warrantyRevisions, settings.warrantyRules).targetKm;
-
-    const { error } = await supabase.from('warranty_revisions').insert({
-      motorcycle_id: data.motorcycleId,
-      revision_number: data.revisionNumber,
-      target_km: targetKm,
-      max_date: data.completedDate,
-      status: 'REALIZADA',
-      completed: true,
-      completed_date: data.completedDate,
-      completed_km: data.completedKm,
-      service_order_id: data.serviceOrderId || null,
-      mechanic_name: data.mechanicName || 'Oficina',
-      notes: data.notes || `Revisão de ${targetKm} km concluída com sucesso`,
-      registered_by_user_id: currentUserRef.current?.id || null,
-    });
-    if (error) return { success: false, message: error.message };
-
-    const newMotorcycleKm = Math.max(moto.currentKm, data.completedKm);
-    await supabase.from('motorcycles').update({ current_km: newMotorcycleKm }).eq('id', data.motorcycleId);
-
-    await refetchWarrantyRevisions();
-    await refetchMotorcycles();
-
-    const updatedRevisions = [...warrantyRevisions, {
-      id: 'temp', motorcycleId: data.motorcycleId, revisionNumber: data.revisionNumber, targetKm,
-      maxDate: data.completedDate, status: 'REALIZADA' as const, completed: true,
-      completedDate: data.completedDate, completedKm: data.completedKm, createdAt: new Date().toISOString(),
-    }];
-    const nextRevData = computeNextScheduledRevision(
-      { ...moto, currentKm: newMotorcycleKm },
-      updatedRevisions,
-      settings.warrantyRules
-    );
-    await supabase
-      .from('motorcycles')
-      .update({ next_revision_km: nextRevData.targetKm, next_revision_date: nextRevData.maxDate })
-      .eq('id', data.motorcycleId);
-
-    await supabase
-      .from('notifications')
-      .delete()
-      .eq('link_target', 'revisoes')
-      .eq('link_id', data.motorcycleId);
-
-    await addNotification(
-      'Revisão de Garantia Registrada',
-      `Revisão de ${targetKm} km registrada para ${moto.brand} ${moto.model} (${moto.plate}). Próxima revisão: ${nextRevData.targetKm} km ou até ${nextRevData.maxDate}.`,
-      'REVISAO_PROXIMA',
-      'revisoes',
-      moto.id
-    );
-
-    await logAudit(
-      'Revisão de Garantia Realizada',
-      `Registrou a ${data.revisionNumber}ª revisão (${data.completedKm} km) da moto ${moto.brand} ${moto.model} (${moto.plate})`,
-      'Revisões',
-      moto.id
-    );
-
-    return { success: true };
-  };
-
-  // ---------- NOTIFICATIONS ----------
-  const markNotificationAsRead = async (id: string) => {
-    await supabase.from('notifications').update({ read: true }).eq('id', id);
-  };
-  const markAllNotificationsAsRead = async () => {
-    const unreadIds = notifications.filter((n) => !n.read).map((n) => n.id);
-    if (unreadIds.length > 0) {
-      await supabase.from('notifications').update({ read: true }).in('id', unreadIds);
-    }
-  };
-  const deleteNotification = async (id: string) => {
-    await supabase.from('notifications').delete().eq('id', id);
-  };
-
-  // ---------- SETTINGS ----------
-  const updateSettings = async (updates: Partial<StoreSettings>) => {
-    const { error } = await supabase.from('store_settings').update(settingsToRow(updates)).eq('id', 1);
-    if (error) return { success: false, message: error.message };
-    await logAudit('Configurações Atualizadas', 'Atualizou as configurações gerais da loja', 'Configurações');
-    return { success: true };
-  };
-
-  const updateWarrantyRules = async (rules: WarrantyRuleConfig) => {
-    const { error } = await supabase.from('store_settings').update(settingsToRow({ warrantyRules: rules })).eq('id', 1);
-    if (error) return { success: false, message: error.message };
-    await logAudit(
-      'Regras de Revisão Atualizadas',
-      `1ª revisão: ${rules.firstRevisionKm}km, Intervalo: ${rules.subsequentIntervalKm}km, Meses: ${rules.intervalMonths}m`,
-      'Configurações'
-    );
-    return { success: true };
-  };
-
-  const updateRolePermission = async (role: UserRole, sectionKey: SectionKey, canView: boolean) => {
-    if (role === 'admin') {
-      return { success: false, message: 'O administrador sempre tem acesso a todas as seções.' };
-    }
-    const { error } = await supabase
-      .from('role_permissions')
-      .upsert({ role, section_key: sectionKey, can_view: canView, updated_at: new Date().toISOString() }, { onConflict: 'role,section_key' });
-    if (error) return { success: false, message: error.message };
-
-    await refetchRolePermissions();
-    await logAudit(
-      'Permissões de Papel Atualizadas',
-      `${canView ? 'Concedeu' : 'Revogou'} acesso à seção "${sectionKey}" para o papel "${role}"`,
-      'Configurações'
-    );
-    return { success: true };
-  };
-
-  // ---------- ERROR & BUG REPORTS ----------
-  const addErrorReport = async (data: Omit<ErrorReport, 'id' | 'createdAt' | 'status'>) => {
-    const { data: row, error } = await supabase
-      .from('error_reports')
-      .insert({
-        user_id: data.userId || null,
-        user_name: data.userName,
-        user_email: data.userEmail,
-        user_role: data.userRole,
-        title: data.title,
-        description: data.description,
-        category: data.category,
-        severity: data.severity,
-        status: 'PENDENTE',
-        screen_or_module: data.screenOrModule || null,
-        screenshot_url: data.screenshotUrl || null,
-      })
-      .select()
-      .single();
-    if (error || !row) return { success: false, message: error?.message || 'Erro ao enviar chamado.' };
-    const newReport = errorReportFromRow(row);
-    await logAudit('Chamado de Erro Aberto', `Usuário ${newReport.userName} reportou: ${newReport.title} [Severidade: ${newReport.severity}]`, 'Suporte/Erros', newReport.id);
-    return { success: true, report: newReport, message: 'Chamado enviado com sucesso! O administrador foi notificado.' };
-  };
-
-  const updateErrorReportStatus = async (
-    id: string,
-    status: ErrorStatus,
-    adminResponse?: string,
-    resolvedBy?: string
-  ) => {
-    const updates: Record<string, any> = { status };
-    if (adminResponse !== undefined) updates.admin_response = adminResponse;
-    if (status === 'RESOLVIDO') {
-      updates.resolved_by = resolvedBy || currentUserRef.current?.name || 'Administrador';
-      updates.resolved_at = new Date().toISOString();
-    }
-    const { error } = await supabase.from('error_reports').update(updates).eq('id', id);
-    if (error) return { success: false, message: error.message };
-
-    const target = errorReports.find((r) => r.id === id);
-    await logAudit('Status do Chamado Atualizado', `Chamado "${target?.title || id}" alterado para status: ${status}.`, 'Suporte/Erros', id);
-    return { success: true, message: 'Status do chamado atualizado com sucesso!' };
-  };
-
-  const deleteErrorReport = async (id: string) => {
-    const { error } = await supabase.from('error_reports').delete().eq('id', id);
-    if (error) return { success: false, message: error.message };
-    await logAudit('Chamado de Erro Excluído', `Chamado ID ${id} excluído do histórico`, 'Suporte/Erros', id);
-    return { success: true, message: 'Chamado removido com sucesso.' };
-  };
-
-  // ---------- RESET & EXPORT / IMPORT ----------
-  const resetDatabase = async () => {
-    // Deletes every business record permanently - order matters because of
-    // foreign keys. store_settings and the user list are left untouched.
-    await supabase.from('service_order_parts').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('service_order_services').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('stock_movements').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('warranty_revisions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('service_orders').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('motorcycles').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('clients').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('parts').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('notifications').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('audit_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-
-    await Promise.all([
-      refetchClients(), refetchMotorcycles(), refetchParts(), refetchServiceOrders(),
-      refetchStockMovements(), refetchWarrantyRevisions(), refetchNotifications(), refetchAuditLogs(),
-    ]);
-    await logAudit('Limpeza Total de Dados', 'Apagou permanentemente todos os clientes, motos, OS, estoque e histórico do sistema', 'Sistema');
-    return { success: true };
-  };
-
-  const exportDatabaseJSON = (): string => {
-    const dump = {
-      version: '2.0-supabase',
-      exportedAt: new Date().toISOString(),
-      settings,
-      clients,
-      motorcycles,
-      parts,
-      services,
-      serviceOrders,
-      stockMovements,
-      warrantyRevisions,
-      auditLogs,
     };
-    return JSON.stringify(dump, null, 2);
+    reader.readAsText(file);
   };
 
-  const importDatabaseJSON = async (jsonStr: string) => {
-    try {
-      const data = JSON.parse(jsonStr);
-      if (!data.clients || !data.motorcycles || !data.parts) {
-        return { success: false, message: 'Arquivo JSON inválido ou incompatível com o sistema.' };
-      }
-      // Re-importing directly into Supabase (rather than replacing local
-      // state) means going through the normal insert paths so IDs, FKs and
-      // RLS stay consistent, at the cost of not being a single atomic
-      // operation. This is intended for restoring a backup into an empty
-      // system, not for merging into an already-populated one.
-      if (Array.isArray(data.clients)) {
-        for (const c of data.clients) await addClient(c);
-      }
-      if (Array.isArray(data.parts)) {
-        for (const p of data.parts) await addPart(p);
-      }
-      if (Array.isArray(data.services)) {
-        for (const s of data.services) await addService(s);
-      }
-      await logAudit('Importação de Backup', 'Importou backup de dados com sucesso', 'Sistema');
-      return { success: true, message: 'Backup importado com sucesso! (Clientes, peças e serviços)' };
-    } catch {
-      return { success: false, message: 'Falha ao processar o arquivo JSON.' };
+  const getRoleBadge = (role: UserRole) => {
+    switch (role) {
+      case 'admin':
+        return { label: 'Administrador (Total)', color: 'bg-red-100 text-red-700 border-red-200' };
+      case 'vendedor':
+        return { label: 'Vendedor', color: 'bg-blue-100 text-blue-700 border-blue-200' };
+      case 'recepcionista':
+      case 'staff':
+        return { label: 'Recepcionista', color: 'bg-purple-100 text-purple-700 border-purple-200' };
+      case 'mecanico':
+        return { label: 'Mecânico', color: 'bg-amber-100 text-amber-700 border-amber-200' };
+      default:
+        return { label: role, color: 'bg-slate-100 text-slate-700 border-slate-200' };
     }
   };
 
-  return (
-    <StoreContext.Provider
-      value={{
-        clients,
-        motorcycles,
-        parts,
-        services,
-        serviceOrders,
-        stockMovements,
-        warrantyRevisions,
-        notifications,
-        auditLogs,
-        settings,
-        errorReports,
-        pendingErrorReportsCount,
-        isDataReady,
-        addErrorReport,
-        updateErrorReportStatus,
-        deleteErrorReport,
-        addClient,
-        updateClient,
-        deleteClient,
-        addMotorcycle,
-        updateMotorcycle,
-        updateMotorcycleKm,
-        deleteMotorcycle,
-        importMotorcyclesFromNfe,
-        addPart,
-        updatePart,
-        deletePart,
-        recalculateAllPartsPrices,
-        addStockEntry,
-        addStockExit,
-        addService,
-        updateService,
-        deleteService,
-        createServiceOrder,
-        updateServiceOrder,
-        changeServiceOrderStatus,
-        deleteServiceOrder,
-        registerCompletedRevision,
-        getMotorcycleNextRevision,
-        getClientById,
-        getMotorcycleById,
-        getPartById,
-        markNotificationAsRead,
-        markAllNotificationsAsRead,
-        deleteNotification,
-        updateSettings,
-        updateWarrantyRules,
-        resetDatabase,
-        exportDatabaseJSON,
-        importDatabaseJSON,
-        rolePermissions,
-        canViewSection,
-        updateRolePermission,
-      }}
-    >
-      {children}
-    </StoreContext.Provider>
-  );
-};
-
-export const useStore = () => {
-  const context = useContext(StoreContext);
-  if (!context) {
-    throw new Error('useStore must be used within a StoreProvider');
+  // Access guard: this screen exposes user management, audit logs and full
+  // database export/import/reset. It must only be reachable by Administrators,
+  // even if a non-admin lands here indirectly (e.g. via a notification link).
+  if (!isAdmin) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 text-center">
+        <div className="w-16 h-16 rounded-3xl bg-red-50 text-red-600 border border-red-200 flex items-center justify-center mb-4">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+        <h2 className="text-lg font-extrabold text-slate-900">Acesso Restrito</h2>
+        <p className="text-sm text-slate-500 mt-1 max-w-sm">
+          Esta área é exclusiva para Administradores. Fale com o administrador do
+          sistema caso precise de alguma alteração aqui.
+        </p>
+      </div>
+    );
   }
-  return context;
+
+  return (    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2.5">
+          <Shield className="w-6 h-6 text-red-600" />
+          Configurações & Administração do Sistema
+        </h2>
+        <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+          Parâmetros da loja, aprovação de cadastros, controle de acessos por função, auditoria e backup
+        </p>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex border-b border-slate-200 gap-2 overflow-x-auto">
+        <button
+          onClick={() => setActiveTab('loja')}
+          className={`py-3 px-4 text-xs font-bold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'loja'
+              ? 'border-red-600 text-red-600'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Building2 className="w-4 h-4" />
+          Dados da Loja & Regras de Garantia
+        </button>
+
+        <button
+          onClick={() => setActiveTab('usuarios')}
+          className={`py-3 px-4 text-xs font-bold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap relative cursor-pointer ${
+            activeTab === 'usuarios'
+              ? 'border-red-600 text-red-600'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          <span>Usuários & Aprovação de Cadastros</span>
+          {pendingApprovalCount > 0 && (
+            <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-500 text-slate-950 rounded-full animate-pulse">
+              {pendingApprovalCount} pendente(s)
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('permissoes')}
+          className={`py-3 px-4 text-xs font-bold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'permissoes'
+              ? 'border-red-600 text-red-600'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Lock className="w-4 h-4" />
+          Permissões por Função
+        </button>
+
+        <button
+          onClick={() => setActiveTab('erros')}
+          className={`py-3 px-4 text-xs font-bold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap relative cursor-pointer ${
+            activeTab === 'erros'
+              ? 'border-red-600 text-red-600'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Bug className="w-4 h-4 text-red-500" />
+          <span>Central de Erros & Chamados</span>
+          {pendingErrorReportsCount > 0 && (
+            <span className="px-2 py-0.5 text-[10px] font-bold bg-red-600 text-white rounded-full animate-pulse">
+              {pendingErrorReportsCount} pendente(s)
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('auditoria')}
+          className={`py-3 px-4 text-xs font-bold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'auditoria'
+              ? 'border-red-600 text-red-600'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Shield className="w-4 h-4" />
+          Logs de Auditoria ({auditLogs.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('dados')}
+          className={`py-3 px-4 text-xs font-bold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'dados'
+              ? 'border-red-600 text-red-600'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Database className="w-4 h-4" />
+          Backup & Banco de Dados
+        </button>
+      </div>
+
+      {/* TAB 1: LOJA & GARANTIA */}
+      {activeTab === 'loja' && (
+        <form onSubmit={handleSaveSettings} className="bg-white rounded-3xl border border-slate-200 shadow-xs p-6 space-y-6">
+          {savedSuccess && (
+            <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+              Configurações atualizadas com sucesso!
+            </div>
+          )}
+
+          {/* Dados Cadastrais */}
+          <div className="space-y-4">
+            <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-red-600" />
+              Dados da Concessionária (Shineray Oficial)
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Nome Fantasia
+                </label>
+                <input
+                  type="text"
+                  value={storeName}
+                  onChange={(e) => setStoreName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Razão Social
+                </label>
+                <input
+                  type="text"
+                  value={legalName}
+                  onChange={(e) => setLegalName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  CNPJ
+                </label>
+                <input
+                  type="text"
+                  value={cnpj}
+                  onChange={(e) => setCnpj(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Telefone Fixo
+                </label>
+                <input
+                  type="text"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  WhatsApp Oficial da Oficina
+                </label>
+                <input
+                  type="text"
+                  value={whatsapp}
+                  onChange={(e) => setWhatsapp(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  E-mail de Contato
+                </label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-hidden"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Endereço Completo
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="Rua / Avenida"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-hidden"
+                  />
+                  <input
+                    type="text"
+                    value={number}
+                    onChange={(e) => setNumber(e.target.value)}
+                    placeholder="Nº"
+                    className="w-24 px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-hidden text-center"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Bairro
+                </label>
+                <input
+                  type="text"
+                  value={neighborhood}
+                  onChange={(e) => setNeighborhood(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-hidden"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Cidade
+                </label>
+                <input
+                  type="text"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-hidden"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  UF
+                </label>
+                <input
+                  type="text"
+                  value={state}
+                  onChange={(e) => setState(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm uppercase focus:outline-hidden"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Regras de Garantia */}
+          <div className="p-5 bg-red-50/50 border border-red-100 rounded-2xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-red-100/80 pb-3">
+              <h4 className="font-bold text-red-950 text-xs uppercase tracking-wider flex items-center gap-2">
+                <Wrench className="w-4 h-4 text-red-600" />
+                Parâmetros de Revisões de Garantia Shineray & Alertas Automáticos
+              </h4>
+              <span className="text-[11px] text-red-700 bg-red-100/60 px-2.5 py-1 rounded-full font-medium">
+                Cálculo inteligente de quilometragem e tolerâncias
+              </span>
+            </div>
+
+            {/* Opção de desconsiderar 1000km e começar a partir de novo parâmetro */}
+            <div className="p-3.5 bg-white border border-red-200 rounded-xl space-y-2">
+              <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={skipFirst1000Km}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setSkipFirst1000Km(checked);
+                    if (checked && firstRevisionKm === 1000) {
+                      setFirstRevisionKm(3000); // Sugere o novo parâmetro padrão
+                    } else if (!checked && firstRevisionKm === 3000) {
+                      setFirstRevisionKm(1000);
+                    }
+                  }}
+                  className="w-4 h-4 text-red-600 rounded-md border-slate-300 focus:ring-red-500 cursor-pointer"
+                />
+                <span className="text-xs font-bold text-slate-800">
+                  Desconsiderar os 1.000 km tradicionais da 1ª revisão (Iniciar a contagem a partir de um novo parâmetro)
+                </span>
+              </label>
+              <p className="text-[11px] text-slate-500 pl-6.5">
+                {skipFirst1000Km
+                  ? 'A 1ª revisão não será em 1.000 km. As revisões começarão a contar a partir do KM inicial definido abaixo e progredirão no intervalo configurado.'
+                  : 'Padrão tradicional Shineray: 1ª revisão aos 1.000 km e as subsequentes no intervalo configurado (ex: 4.000 km, 7.000 km...).'}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-5 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  {skipFirst1000Km ? 'Novo KM Inicial (1ª Rev.)' : '1ª Revisão (KM)'}
+                </label>
+                <input
+                  type="number"
+                  min={100}
+                  step={100}
+                  value={firstRevisionKm}
+                  onChange={(e) => setFirstRevisionKm(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold font-mono focus:outline-hidden focus:border-red-500"
+                />
+                <span className="text-[10px] text-slate-500 mt-0.5 block">
+                  {skipFirst1000Km ? 'Ex: 3.000 km, 4.000 km' : 'Padrão: 1.000 km'}
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Intervalo KM Subsequente
+                </label>
+                <input
+                  type="number"
+                  min={500}
+                  step={500}
+                  value={subsequentIntervalKm}
+                  onChange={(e) => setSubsequentIntervalKm(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold font-mono focus:outline-hidden focus:border-red-500"
+                />
+                <span className="text-[10px] text-slate-500 mt-0.5 block">Padrão: 3.000 km</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Intervalo em Meses
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={24}
+                  value={intervalMonths}
+                  onChange={(e) => setIntervalMonths(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold font-mono focus:outline-hidden focus:border-red-500"
+                />
+                <span className="text-[10px] text-slate-500 mt-0.5 block">Padrão: 6 meses</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Tolerância (Dias)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={alertDaysTolerance}
+                  onChange={(e) => setAlertDaysTolerance(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold font-mono focus:outline-hidden focus:border-red-500"
+                />
+                <span className="text-[10px] text-slate-500 mt-0.5 block">Padrão: 30 dias</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Tolerância (KM)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step={50}
+                  value={alertKmTolerance}
+                  onChange={(e) => setAlertKmTolerance(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold font-mono focus:outline-hidden focus:border-red-500"
+                />
+                <span className="text-[10px] text-slate-500 mt-0.5 block">Padrão: 500 km</span>
+              </div>
+            </div>
+
+            {/* Simulação em tempo real do cronograma gerado */}
+            <div className="bg-white/80 rounded-xl p-3 border border-red-100">
+              <span className="text-[11px] font-bold text-slate-700 block mb-2">
+                Simulação da Escala de Revisões com os Parâmetros Atuais:
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[1, 2, 3, 4].map((revNum) => {
+                  const targetKm =
+                    revNum === 1
+                      ? Number(firstRevisionKm)
+                      : Number(firstRevisionKm) + (revNum - 1) * Number(subsequentIntervalKm);
+                  const months = revNum * Number(intervalMonths);
+                  return (
+                    <div
+                      key={revNum}
+                      className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-center"
+                    >
+                      <div className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">
+                        {revNum}ª Revisão
+                      </div>
+                      <div className="text-xs font-black text-red-600 font-mono mt-0.5">
+                        {targetKm.toLocaleString('pt-BR')} km
+                      </div>
+                      <div className="text-[10px] text-slate-400">ou até {months} meses</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Parâmetros de Precificação Automática de Peças */}
+          <div className="p-5 bg-amber-50/40 border border-amber-200/80 rounded-2xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200/60 pb-3">
+              <h4 className="font-bold text-amber-950 text-xs uppercase tracking-wider flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-600" />
+                Parâmetros de Precificação Automática de Peças (% Margem / Markup)
+              </h4>
+              <span className="text-[11px] text-amber-800 bg-amber-100 px-2.5 py-1 rounded-full font-medium">
+                Cálculo automático: Preço de Venda = Custo de Compra + Margem %
+              </span>
+            </div>
+
+            {recalcSuccessMsg && (
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                {recalcSuccessMsg}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Margem de Lucro Padrão (% Markup)
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={0}
+                    max={500}
+                    step={1}
+                    value={defaultMarkupPercent}
+                    onChange={(e) => setDefaultMarkupPercent(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold font-mono pr-8 focus:outline-hidden focus:border-amber-500"
+                  />
+                  <span className="absolute right-3 top-2 text-xs font-bold text-slate-400">%</span>
+                </div>
+                <span className="text-[10px] text-slate-500 mt-0.5 block">
+                  Ex: 40% (Adiciona 40% sobre o valor de custo)
+                </span>
+              </div>
+
+              <div className="sm:col-span-2 space-y-2">
+                <label className="flex items-center gap-2.5 cursor-pointer select-none pt-1">
+                  <input
+                    type="checkbox"
+                    checked={autoApplyMarkup}
+                    onChange={(e) => setAutoApplyMarkup(e.target.checked)}
+                    className="w-4 h-4 text-amber-600 rounded-md border-slate-300 focus:ring-amber-500 cursor-pointer"
+                  />
+                  <span className="text-xs font-bold text-slate-800">
+                    Sugerir/Preencher preço de venda automaticamente nos novos cadastros e entradas de estoque
+                  </span>
+                </label>
+                <div className="text-[11px] text-slate-600 bg-white p-3 rounded-xl border border-amber-100">
+                  <span className="font-bold text-slate-800">Exemplo prático de precificação:</span>
+                  <div className="mt-1 flex flex-wrap items-center gap-3 text-xs">
+                    <span>
+                      Custo de Compra: <strong className="font-mono text-slate-900">R$ 50,00</strong>
+                    </span>
+                    <span>+</span>
+                    <span>
+                      Margem: <strong className="font-mono text-amber-700">+{defaultMarkupPercent}%</strong>
+                    </span>
+                    <span>=</span>
+                    <span>
+                      Preço de Venda Sugerido:{' '}
+                      <strong className="font-mono text-emerald-700">
+                        R${' '}
+                        {(50 * (1 + Number(defaultMarkupPercent) / 100)).toLocaleString('pt-BR', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </strong>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Ação rápida para recalcular todas as peças do estoque com a nova % */}
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-amber-100">
+              <span className="text-xs text-slate-600">
+                Você tem <strong>{parts.length}</strong> peça(s) no catálogo de estoque.
+              </span>
+              <button
+                type="button"
+                onClick={handleRecalculatePrices}
+                className="w-full sm:w-auto px-4 py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-slate-950" />
+                Recalcular Preços de Venda de Todas as Peças ({defaultMarkupPercent}%)
+              </button>
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              className="flex items-center gap-2 px-6 py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-xl shadow-md cursor-pointer"
+            >
+              <Save className="w-4 h-4" />
+              Salvar Configurações
+            </button>
+          </div>
+        </form>
+      )}      {/* TAB 2: USUÁRIOS E APROVAÇÃO */}
+      {activeTab === 'usuarios' && (
+        <div className="space-y-6">
+          {/* SEÇÃO 1: SOLICITAÇÕES DE CADASTRO PENDENTES */}
+          {pendingApprovalCount > 0 ? (
+            <div className="bg-amber-50/70 border-2 border-amber-300 rounded-3xl p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-amber-500 text-white rounded-xl shadow-xs">
+                    <Clock className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-amber-950 text-sm sm:text-base flex items-center gap-2">
+                      <span>Solicitações de Acesso Pendentes</span>
+                      <span className="px-2.5 py-0.5 bg-amber-500 text-slate-950 rounded-full text-xs font-black">
+                        {pendingApprovalCount}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-amber-800">
+                      Estes colaboradores já confirmaram o e-mail via código e aguardam sua autorização para acessar o sistema.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-1">
+                {pendingApprovalUsers.map((pendingUser) => {
+                  const assignedRole = approvalRoleOverrides[pendingUser.id] || pendingUser.role;
+                  return (
+                    <div
+                      key={pendingUser.id}
+                      className="bg-white border border-amber-200 rounded-2xl p-4.5 shadow-xs space-y-3.5"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-800 font-bold flex items-center justify-center text-sm border border-amber-200">
+                            {pendingUser.name.substring(0, 2).toUpperCase()}
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-slate-900 text-xs sm:text-sm">{pendingUser.name}</h4>
+                            <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                              <Mail className="w-3 h-3 text-slate-400" />
+                              {pendingUser.email}
+                            </p>
+                            {pendingUser.phone && (
+                              <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                                <Phone className="w-3 h-3 text-slate-400" />
+                                {pendingUser.phone}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        <span className="px-2 py-0.5 bg-amber-100 text-amber-800 border border-amber-200 rounded-full text-[10px] font-bold">
+                          E-mail Confirmado ✓
+                        </span>
+                      </div>
+
+                      {/* Cargo selector before approval */}
+                      <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
+                        <span className="font-bold text-slate-600">Cargo / Função a Conceder:</span>
+                        <select
+                          value={assignedRole}
+                          onChange={(e) =>
+                            setApprovalRoleOverrides((prev) => ({
+                              ...prev,
+                              [pendingUser.id]: e.target.value as UserRole,
+                            }))
+                          }
+                          className="bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-800 focus:outline-hidden"
+                        >
+                          <option value="vendedor">Vendedor</option>
+                          <option value="recepcionista">Recepcionista</option>
+                          <option value="mecanico">Mecânico</option>
+                          <option value="admin">Administrador Geral</option>
+                        </select>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => setRejectingUserId(pendingUser.id)}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-xl border border-rose-200 cursor-pointer transition-colors"
+                        >
+                          <XCircle className="w-3.5 h-3.5" />
+                          Recusar
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleApprove(pendingUser.id)}
+                          className="flex items-center gap-1.5 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer transition-colors"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          Aprovar Acesso
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                <span>Nenhum cadastro pendente de aprovação no momento.</span>
+              </div>
+              <span className="text-[11px] text-slate-400">Todos os usuários ativos estão regularizados</span>
+            </div>
+          )}
+
+          {/* SEÇÃO 2: USUÁRIOS ATIVOS DO SISTEMA */}
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-6 space-y-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-slate-900 text-sm sm:text-base">
+                  Controle de Usuários & Permissões do Sistema
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Gerenciamento de papéis (Administrador, Vendedores, Recepcionistas, Mecânicos)
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setAddUserError(null);
+                  setIsUserModalOpen(true);
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl shadow-md cursor-pointer"
+              >
+                <UserPlus className="w-4 h-4" />
+                Adicionar Usuário Direto
+              </button>
+            </div>
+
+            <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden">
+              {users
+                .filter((u) => u.status === 'approved' || !u.status)
+                .map((u) => {
+                  const roleBadge = getRoleBadge(u.role);
+                  return (
+                    <div key={u.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-slate-100 text-slate-700 font-bold flex items-center justify-center text-xs border border-slate-200">
+                          {u.name.substring(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-bold text-slate-900 text-xs sm:text-sm">{u.name}</h4>
+                            {u.id === currentUser?.id && (
+                              <span className="px-1.5 py-0.5 bg-slate-900 text-white rounded-md text-[9px] font-bold">
+                                Você
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-500">{u.email} {u.phone ? `• ${u.phone}` : ''}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2.5 self-end sm:self-auto">
+                        {/* Role selector */}
+                        {isAdmin && u.id !== currentUser?.id ? (
+                          <select
+                            value={u.role}
+                            onChange={(e) => updateUser(u.id, { role: e.target.value as UserRole })}
+                            className="bg-white border border-slate-300 rounded-xl px-2.5 py-1 text-xs font-bold text-slate-700 focus:outline-hidden"
+                          >
+                            <option value="admin">Administrador (Total)</option>
+                            <option value="vendedor">Vendedor</option>
+                            <option value="recepcionista">Recepcionista</option>
+                            <option value="mecanico">Mecânico</option>
+                          </select>
+                        ) : (
+                          <span className={`px-2.5 py-1 rounded-xl text-[10px] font-bold border ${roleBadge.color}`}>
+                            {roleBadge.label}
+                          </span>
+                        )}
+
+                        {/* Toggle active button */}
+                        {isAdmin && u.id !== currentUser?.id && (
+                          <button
+                            type="button"
+                            onClick={() => toggleUserActive(u.id)}
+                            className={`p-1.5 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer ${
+                              u.active ? 'text-emerald-700 hover:bg-emerald-50' : 'text-slate-400 hover:bg-slate-100'
+                            }`}
+                            title={u.active ? 'Desativar usuário' : 'Ativar usuário'}
+                          >
+                            {u.active ? (
+                              <ToggleRight className="w-5 h-5 text-emerald-600" />
+                            ) : (
+                              <ToggleLeft className="w-5 h-5 text-slate-400" />
+                            )}
+                          </button>
+                        )}
+
+                        {/* Delete button */}
+                        {isAdmin && u.id !== currentUser?.id && (
+                          <button
+                            onClick={() => setUserToDelete(u.id)}
+                            className="text-rose-500 hover:text-rose-700 p-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
+                            title="Excluir usuário"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: USUARIOS */}
+      {/* ... usuarios view ... */}
+
+      {/* TAB: PERMISSÕES POR FUNÇÃO */}
+      {activeTab === 'permissoes' && (      {activeTab === 'permissoes' && (
+        <div className="space-y-4">
+          <div className="p-4 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-start gap-3">
+            <Lock className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
+            <div className="text-xs text-indigo-800">
+              <p className="font-bold mb-0.5">Controle de acesso por seção</p>
+              <p>
+                Marque as seções que cada função pode enxergar no menu lateral. O Administrador sempre tem
+                acesso total e não aparece aqui. Mudanças entram em vigor imediatamente para qualquer pessoa
+                conectada, mesmo sem precisar sair e entrar de novo.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[560px]">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Seção do Sistema
+                    </th>
+                    {PERMISSION_ROLES.map((r) => (
+                      <th
+                        key={r.key}
+                        className="px-4 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 text-center"
+                      >
+                        {r.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {PERMISSION_SECTIONS.map((section, idx) => (
+                    <tr
+                      key={section.key}
+                      className={`border-b border-slate-100 ${idx % 2 === 1 ? 'bg-slate-50/50' : ''}`}
+                    >
+                      <td className="px-4 py-3 text-xs font-semibold text-slate-700">{section.label}</td>
+                      {PERMISSION_ROLES.map((r) => {
+                        const checked = isSectionCheckedForRole(r.key, section.key);
+                        return (
+                          <td key={r.key} className="px-4 py-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleTogglePermission(r.key, section.key, checked)}
+                              title={checked ? 'Clique para remover o acesso' : 'Clique para conceder acesso'}
+                              className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-colors cursor-pointer mx-auto ${
+                                checked
+                                  ? 'bg-emerald-500 border-emerald-500 text-white'
+                                  : 'bg-white border-slate-300 hover:border-slate-400'
+                              }`}
+                            >
+                              {checked && <CheckCircle2 className="w-4 h-4" />}
+                            </button>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {permissionSuccessMsg && (
+            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold flex items-center gap-2">
+              <CheckCircle className="w-4 h-4" />
+              {permissionSuccessMsg}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB: CENTRAL DE ERROS */}
+      {activeTab === 'erros' && <ErrorReportsSection />}
+
+      {/* TAB 3: AUDITORIA */}
+      {activeTab === 'auditoria' && (
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+            <div>
+              <h3 className="font-bold text-slate-900 text-sm">Registro de Auditoria</h3>
+              <p className="text-xs text-slate-500">Histórico detalhado de todas as operações e alterações no sistema</p>
+            </div>
+            <span className="text-xs font-bold text-red-700 bg-red-50 px-2.5 py-1 rounded-lg">
+              {auditLogs.length} eventos registrados
+            </span>
+          </div>
+
+          <div className="max-h-[60vh] overflow-y-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] sticky top-0">
+                <tr>
+                  <th className="py-3 px-4">Data / Hora</th>
+                  <th className="py-3 px-3">Usuário</th>
+                  <th className="py-3 px-3">Ação</th>
+                  <th className="py-3 px-3">Entidade</th>
+                  <th className="py-3 px-4">Detalhes</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {auditLogs.map((log) => (
+                  <tr key={log.id} className="hover:bg-slate-50">
+                    <td className="py-3 px-4 font-mono text-slate-600 whitespace-nowrap">
+                      {formatDate(log.timestamp)}
+                    </td>
+                    <td className="py-3 px-3 font-semibold text-slate-800">{log.userName}</td>
+                    <td className="py-3 px-3">
+                      <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-mono text-[10px] font-bold">
+                        {log.action}
+                      </span>
+                    </td>
+                    <td className="py-3 px-3 text-slate-600 font-medium">{log.entity}</td>
+                    <td className="py-3 px-4 text-slate-600 max-w-md truncate">{log.details}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: BACKUP & BANCO DE DADOS */}
+      {activeTab === 'dados' && (
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-6 space-y-6">
+          <div>
+            <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+              <Database className="w-4 h-4 text-red-600" />
+              Backup e Exportação de Dados do Sistema
+            </h3>
+            <p className="text-xs text-slate-500 mt-1">
+              Gere cópias de segurança de todos os clientes, motocicletas, ordens de serviço e catálogo.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+              <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wider flex items-center gap-2">
+                <Download className="w-4 h-4 text-red-600" />
+                Exportar Backup Completo (JSON)
+              </h4>
+              <p className="text-xs text-slate-600">
+                Baixe um arquivo seguro contendo todos os dados e histórico da concessionária.
+              </p>
+              <button
+                type="button"
+                onClick={handleExportJSON}
+                className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                Baixar Arquivo JSON de Backup
+              </button>
+            </div>
+
+            <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+              <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wider flex items-center gap-2">
+                <Upload className="w-4 h-4 text-emerald-600" />
+                Restaurar Backup (JSON)
+              </h4>
+              <p className="text-xs text-slate-600">
+                Substitua ou importe dados de um arquivo salvo anteriormente.
+              </p>
+              <label className="w-full py-2.5 px-4 bg-white hover:bg-slate-100 text-slate-800 font-bold text-xs rounded-xl border border-slate-300 shadow-xs flex items-center justify-center gap-2 cursor-pointer transition-colors">
+                <Upload className="w-4 h-4" />
+                Selecionar Arquivo JSON
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleFileImport}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-slate-200 flex justify-between items-center">
+            <div>
+              <h4 className="font-bold text-rose-700 text-xs">Zona de Risco: Apagar Todos os Dados</h4>
+              <p className="text-xs text-slate-500 max-w-md">
+                Remove permanentemente todos os clientes, motos, ordens de serviço, estoque, movimentações e
+                histórico de auditoria. Não é uma reposição de dados de exemplo - a base fica vazia. Use o
+                backup acima antes de continuar.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsResetConfirmOpen(true)}
+              className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 transition-colors cursor-pointer shrink-0"
+            >
+              Apagar Todos os Dados
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* New User Modal */}
+      {isUserModalOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden p-6 space-y-4">
+            <h3 className="font-bold text-slate-900 text-base">Cadastrar Novo Usuário (Direto)</h3>
+            {addUserError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
+                {addUserError}
+              </div>
+            )}
+            <form onSubmit={handleAddUser} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Nome Completo *</label>
+                <input
+                  type="text"
+                  required
+                  value={newUserName}
+                  onChange={(e) => setNewUserName(e.target.value)}
+                  placeholder="Ex: Carlos Santos"
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">E-mail *</label>
+                <input
+                  type="email"
+                  required
+                  value={newUserEmail}
+                  onChange={(e) => setNewUserEmail(e.target.value)}
+                  placeholder="usuario@vittamotos.com.br"
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Telefone</label>
+                  <input
+                    type="text"
+                    value={newUserPhone}
+                    onChange={(e) => setNewUserPhone(e.target.value)}
+                    placeholder="(27) 99999-0000"
+                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Senha Inicial</label>
+                  <input
+                    type="text"
+                    value={newUserPassword}
+                    onChange={(e) => setNewUserPassword(e.target.value)}
+                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Papel / Função</label>
+                <select
+                  value={newUserRole}
+                  onChange={(e) => setNewUserRole(e.target.value as UserRole)}
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold"
+                >
+                  <option value="vendedor">Vendedor (Gestão de Vendas & Clientes)</option>
+                  <option value="recepcionista">Recepcionista (Atendimento Operacional)</option>
+                  <option value="mecanico">Mecânico (Oficina, OS & Serviços)</option>
+                  <option value="admin">Administrador Geral (Acesso Total)</option>
+                </select>
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsUserModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isAddingUser}
+                  className="px-5 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-500 rounded-xl shadow-md cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {isAddingUser ? 'Cadastrando...' : 'Cadastrar Usuário'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Rejection Modal */}
+      {rejectingUserId && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden p-6 space-y-4">
+            <h3 className="font-bold text-slate-900 text-base flex items-center gap-2 text-rose-600">
+              <XCircle className="w-5 h-5" />
+              Recusar Solicitação de Cadastro
+            </h3>
+            <p className="text-xs text-slate-600">
+              Informe o motivo da recusa (opcional). O usuário será informado ao tentar acessar.
+            </p>
+            <textarea
+              value={rejectionReasonInput}
+              onChange={(e) => setRejectionReasonInput(e.target.value)}
+              placeholder="Ex: Cadastro duplicado / E-mail não autorizado para a equipe."
+              className="w-full h-24 p-3 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:outline-hidden"
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setRejectingUserId(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleRejectConfirm}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 rounded-xl shadow-md cursor-pointer"
+              >
+                Confirmar Recusa
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Confirmation */}
+      {isResetConfirmOpen && (
+        <ConfirmationModal
+          isOpen={isResetConfirmOpen}
+          onClose={() => setIsResetConfirmOpen(false)}
+          onConfirm={async () => {
+            await resetDatabase();
+            setIsResetConfirmOpen(false);
+          }}
+          title="Apagar Todos os Dados do Sistema"
+          message="Atenção: esta ação é IRREVERSÍVEL. Todos os clientes, motos, ordens de serviço, peças, movimentações de estoque e histórico de auditoria serão permanentemente apagados. Isso não é uma reposição de dados de exemplo - a base ficará vazia. Baixe um backup antes de continuar, se ainda não o fez. Deseja mesmo apagar tudo?"
+          confirmText="Sim, Apagar Tudo Permanentemente"
+        />
+      )}
+
+      {/* Delete User Confirmation */}
+      {userToDelete && (
+        <ConfirmationModal
+          isOpen={!!userToDelete}
+          onClose={() => setUserToDelete(null)}
+          onConfirm={async () => {
+            const res = await deleteUser(userToDelete);
+            if (!res.success) {
+              alert(res.message);
+            }
+            setUserToDelete(null);
+          }}
+          title="Excluir Usuário"
+          message="Tem certeza que deseja remover este usuário?"
+          confirmText="Sim, Remover"
+        />
+      )}
+    </div>
+  );
 };
