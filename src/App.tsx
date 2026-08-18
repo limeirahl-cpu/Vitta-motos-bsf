@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { StoreProvider, useStore } from './context/StoreContext';
 import { LoginView } from './components/auth/LoginView';
@@ -20,7 +20,7 @@ import { StockMovementsView } from './components/stock/StockMovementsView';
 import { ServicesCatalogView } from './components/services/ServicesCatalogView';
 import { ReportsView } from './components/reports/ReportsView';
 import { AdminSettingsView } from './components/admin/AdminSettingsView';
-import { Motorcycle, Client } from './types';
+import { Motorcycle, Client, SectionKey } from './types';
 
 const LoadingScreen: React.FC<{ label: string }> = ({ label }) => (
   <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center gap-3">
@@ -30,8 +30,8 @@ const LoadingScreen: React.FC<{ label: string }> = ({ label }) => (
 );
 
 const MainLayout: React.FC = () => {
-  const { isAuthenticated, isAdmin, isAuthReady } = useAuth();
-  const { motorcycles, clients, isDataReady } = useStore();
+  const { isAuthenticated, isAdmin, isAuthReady, currentUser } = useAuth();
+  const { motorcycles, clients, isDataReady, canViewSection } = useStore();
 
   const [currentView, setCurrentView] = useState<string>('dashboard');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -56,6 +56,21 @@ const MainLayout: React.FC = () => {
   const [selectedClientDetail, setSelectedClientDetail] = useState<Client | null>(null);
   const [selectedMotoDetail, setSelectedMotoDetail] = useState<Motorcycle | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+
+  // If the current section becomes unavailable for this role - either at
+  // load time, or live if an admin revokes access while the person is
+  // already on that screen - bounce to Dashboard instead of showing a
+  // section they're not supposed to see.
+  useEffect(() => {
+    if (!isDataReady || !currentUser) return;
+    const isAdminOnlySection = currentView === 'configuracoes';
+    if (isAdminOnlySection) {
+      if (!isAdmin) setCurrentView('dashboard');
+      return;
+    }
+    const allowed = canViewSection(currentUser.role, currentView as SectionKey);
+    if (!allowed) setCurrentView('dashboard');
+  }, [currentView, isDataReady, currentUser, isAdmin, canViewSection]);
 
   // Avoid a flash of the login screen while a stored session is still
   // being restored/validated against Supabase on first load.
