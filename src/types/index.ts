@@ -282,3 +282,20 @@ export interface StoreSettings {
   defaultMarkupPercent?: number; // % Margem padrão para precificação automática de peças (ex: 40%)
   autoApplyMarkup?: boolean; // Se deve calcular automaticamente o preço de venda
 }
+
+export type SectionKey =
+  | 'dashboard'
+  | 'clientes'
+  | 'motos'
+  | 'revisoes'
+  | 'ordens'
+  | 'servicos'
+  | 'estoque'
+  | 'movimentacoes'
+  | 'relatorios';
+
+export interface RolePermission {
+  role: UserRole;
+  sectionKey: SectionKey;
+  canView: boolean;
+}
