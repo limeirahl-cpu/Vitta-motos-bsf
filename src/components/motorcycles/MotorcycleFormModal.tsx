@@ -25,11 +25,17 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
   initialData,
   defaultClientId,
 }) => {
-  const { clients } = useStore();
+  const { clients, userStoreAccessList, activeStoreId } = useStore();
   const { users, currentUser } = useAuth();
 
-  // Find all active registered sellers / collaborators
-  const sellers = users.filter((u) => u.active && (u.status === 'approved' || !u.status));
+  // Find registered sellers/collaborators with access to the active store
+  // (admins are always included since they work across every store).
+  const sellers = users.filter(
+    (u) =>
+      u.active &&
+      (u.status === 'approved' || !u.status) &&
+      (u.role === 'admin' || userStoreAccessList.some((a) => a.userId === u.id && a.storeId === activeStoreId))
+  );
 
   const [clientId, setClientId] = useState(
     initialData?.clientId || defaultClientId || (clients[0]?.id || '')

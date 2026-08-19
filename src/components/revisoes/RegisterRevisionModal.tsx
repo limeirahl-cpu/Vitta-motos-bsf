@@ -11,6 +11,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useStore } from '../../context/StoreContext';
 import { OSPartItem, OSServiceItem } from '../../types';
 import { formatCurrency, formatDate, formatKm } from '../../utils/formatters';
+import { calculateTargetKm } from '../../utils/warrantyCalculator';
 
 interface RegisterRevisionModalProps {
   isOpen: boolean;
@@ -33,8 +34,19 @@ export const RegisterRevisionModal: React.FC<RegisterRevisionModalProps> = ({
     getMotorcycleNextRevision,
     registerCompletedRevision,
     createServiceOrder,
+    settings,
+    userStoreAccessList,
+    activeStoreId,
   } = useStore();
-  const { currentUser } = useAuth();
+  const { currentUser, users } = useAuth();
+
+  const mechanics = users.filter(
+    (u) =>
+      u.role === 'mecanico' &&
+      u.active &&
+      (u.status === 'approved' || !u.status) &&
+      userStoreAccessList.some((a) => a.userId === u.id && a.storeId === activeStoreId)
+  );
 
   const [motorcycleId, setMotorcycleId] = useState(
     defaultMotorcycleId || motorcycles[0]?.id || ''
@@ -281,12 +293,11 @@ export const RegisterRevisionModal: React.FC<RegisterRevisionModalProps> = ({
                 onChange={(e) => setRevisionNumber(Number(e.target.value))}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-indigo-700"
               >
-                <option value={1}>1ª Revisão (1.000 KM)</option>
-                <option value={2}>2ª Revisão (4.000 KM)</option>
-                <option value={3}>3ª Revisão (7.000 KM)</option>
-                <option value={4}>4ª Revisão (10.000 KM)</option>
-                <option value={5}>5ª Revisão (13.000 KM)</option>
-                <option value={6}>6ª Revisão (16.000 KM)</option>
+                {[1, 2, 3, 4, 5, 6].map((n) => (
+                  <option key={n} value={n}>
+                    {n}ª Revisão ({formatKm(calculateTargetKm(n, settings.warrantyRules))})
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -324,13 +335,22 @@ export const RegisterRevisionModal: React.FC<RegisterRevisionModalProps> = ({
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                 Mecânico Responsável *
               </label>
-              <input
-                type="text"
+              <select
                 required
                 value={mechanicName}
                 onChange={(e) => setMechanicName(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold"
-              />
+              >
+                <option value="">Selecione o mecânico...</option>
+                {mechanics.map((m) => (
+                  <option key={m.id} value={m.name}>
+                    {m.name}
+                  </option>
+                ))}
+                {mechanicName && !mechanics.some((m) => m.name === mechanicName) && (
+                  <option value={mechanicName}>{mechanicName}</option>
+                )}
+              </select>
             </div>
 
             <div>

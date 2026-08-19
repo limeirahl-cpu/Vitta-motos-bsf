@@ -12,11 +12,12 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useStore } from '../../context/StoreContext';
-import { Client } from '../../types';
+import { Client, Motorcycle } from '../../types';
 import { formatDate } from '../../utils/formatters';
 import { ConfirmationModal } from '../common/ConfirmationModal';
 import { ClientDetailModal } from './ClientDetailModal';
 import { ClientFormModal } from './ClientFormModal';
+import { MotorcycleFormModal } from '../motorcycles/MotorcycleFormModal';
 
 interface ClientsListProps {
   onSelectClient?: (clientId: string) => void;
@@ -48,12 +49,13 @@ export const ClientsList: React.FC<ClientsListProps> = ({
       onCreateOrder(clientId);
     }
   };
-  const { clients, addClient, updateClient, deleteClient, motorcycles, serviceOrders } = useStore();
+  const { clients, addClient, updateClient, deleteClient, addMotorcycle, motorcycles, serviceOrders } = useStore();
   const { isAdmin } = useAuth();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClientForDetail, setSelectedClientForDetail] = useState<Client | null>(null);
   const [clientToEdit, setClientToEdit] = useState<Client | null>(null);
+  const [promptMotoForClientId, setPromptMotoForClientId] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [clientToDelete, setClientToDelete] = useState<Client | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -74,10 +76,17 @@ export const ClientsList: React.FC<ClientsListProps> = ({
   const handleSaveClient = async (clientData: Omit<Client, 'id' | 'createdAt'>) => {
     if (clientToEdit) {
       await updateClient(clientToEdit.id, clientData);
+      setClientToEdit(null);
     } else {
-      await addClient(clientData);
+      const res = await addClient(clientData);
+      setClientToEdit(null);
+      // Right after registering a brand-new client, offer to register their
+      // motorcycle immediately so it's linked and shows up on the client's
+      // record without a separate trip to the Motos screen.
+      if (res.success && res.client) {
+        setPromptMotoForClientId(res.client.id);
+      }
     }
-    setClientToEdit(null);
   };
 
   const handleConfirmDelete = async () => {
@@ -273,6 +282,21 @@ export const ClientsList: React.FC<ClientsListProps> = ({
           }}
           onSave={handleSaveClient}
           initialData={clientToEdit}
+        />
+      )}
+
+      {/* Offered right after a brand-new client is created, so the seller
+          can register their motorcycle in the same flow. */}
+      {promptMotoForClientId && (
+        <MotorcycleFormModal
+          isOpen={!!promptMotoForClientId}
+          onClose={() => setPromptMotoForClientId(null)}
+          onSave={async (motoData) => {
+            const res = await addMotorcycle(motoData);
+            if (res.success) setPromptMotoForClientId(null);
+            return res;
+          }}
+          defaultClientId={promptMotoForClientId}
         />
       )}
 

@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ClipboardList,
   Plus,
+  Printer,
   Trash2,
   Wrench,
   X,
@@ -17,7 +18,7 @@ import {
   ServiceOrderStatus,
 } from '../../types';
 import { formatCurrency, PAYMENT_METHOD_OPTIONS } from '../../utils/formatters';
-
+import { REVISION_CHECKLIST_TEMPLATE } from '../../utils/revisionChecklist';
 interface ServiceOrderFormModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -42,8 +43,19 @@ export const ServiceOrderFormModal: React.FC<ServiceOrderFormModalProps> = ({
     updateServiceOrder,
     getClientById,
     getMotorcycleById,
+    userStoreAccessList,
+    activeStoreId,
   } = useStore();
-  const { currentUser } = useAuth();
+  const { currentUser, users } = useAuth();
+
+  // Mechanics registered with access to the currently active store.
+  const mechanics = users.filter(
+    (u) =>
+      u.role === 'mecanico' &&
+      u.active &&
+      (u.status === 'approved' || !u.status) &&
+      userStoreAccessList.some((a) => a.userId === u.id && a.storeId === activeStoreId)
+  );
 
   // State
   const [motorcycleId, setMotorcycleId] = useState<string>(
@@ -114,6 +126,82 @@ export const ServiceOrderFormModal: React.FC<ServiceOrderFormModalProps> = ({
   const [mechanicName, setMechanicName] = useState(
     initialData?.mechanicName || currentUser?.name || 'Mecânico Chefe'
   );
+
+  // Warranty revision checklist - shown once the entry KM is informed for a
+  // REVISAO_GARANTIA order, so the mechanic can print it and take it to the
+  // bay. Purely a print aid: it doesn't change what gets billed/saved on
+  // the OS itself, so the note text below covers the audit trail.
+  const [checklistState, setChecklistState] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    REVISION_CHECKLIST_TEMPLATE.forEach((cat) => cat.items.forEach((item) => { initial[item.id] = true; }));
+    return initial;
+  });
+  const toggleChecklistItem = (id: string) => {
+    setChecklistState((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const handlePrintChecklist = () => {
+    const moto = selectedMoto;
+    const client = clients.find((c) => c.id === clientId);
+    const printWindow = window.open('', '_blank', 'width=800,height=900');
+    if (!printWindow) return;
+
+    const rowsHtml = REVISION_CHECKLIST_TEMPLATE.map(
+      (cat) => `
+        <h3 style="margin:16px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:0.05em;color:#334155;border-bottom:1px solid #e2e8f0;padding-bottom:4px;">${cat.category}</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          ${cat.items
+            .map(
+              (item) => `
+            <tr style="border-bottom:1px solid #f1f5f9;">
+              <td style="width:24px;padding:6px 4px;">
+                <span style="display:inline-block;width:14px;height:14px;border:1.5px solid #94a3b8;border-radius:3px;${
+                  checklistState[item.id] ? 'background:#334155;' : ''
+                }"></span>
+              </td>
+              <td style="padding:6px 4px;color:#1e293b;">${item.label}</td>
+              <td style="padding:6px 4px;width:90px;color:#64748b;font-weight:600;">${item.action}</td>
+            </tr>`
+            )
+            .join('')}
+        </table>`
+    ).join('');
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Checklist de Revisão - ${moto?.plate || ''}</title>
+          <meta charset="utf-8" />
+        </head>
+        <body style="font-family:Arial,Helvetica,sans-serif;padding:24px;color:#0f172a;">
+          <h1 style="font-size:18px;margin:0 0 2px;">Checklist de Revisão de Garantia</h1>
+          <p style="font-size:12px;color:#64748b;margin:0 0 16px;">Vitta Motos - Shineray/SBM</p>
+          <table style="width:100%;font-size:12px;margin-bottom:12px;border-collapse:collapse;">
+            <tr>
+              <td style="padding:4px 0;"><strong>Cliente:</strong> ${client?.name || '-'}</td>
+              <td style="padding:4px 0;"><strong>Placa:</strong> ${moto?.plate || '-'}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 0;"><strong>Modelo:</strong> ${moto?.brand || ''} ${moto?.model || ''}</td>
+              <td style="padding:4px 0;"><strong>KM de Entrada:</strong> ${currentKm}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 0;"><strong>Mecânico:</strong> ${mechanicName || '-'}</td>
+              <td style="padding:4px 0;"><strong>Data:</strong> ${new Date().toLocaleDateString('pt-BR')}</td>
+            </tr>
+          </table>
+          ${rowsHtml}
+          <p style="font-size:11px;color:#94a3b8;margin-top:20px;">
+            Assinatura do Mecânico: _______________________________________
+          </p>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => printWindow.print(), 300);
+  };
+
   const [generalDiscount, setGeneralDiscount] = useState<number>(
     initialData?.generalDiscount || 0
   );
@@ -415,16 +503,69 @@ export const ServiceOrderFormModal: React.FC<ServiceOrderFormModalProps> = ({
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                 Mecânico Responsável *
               </label>
-              <input
-                type="text"
+              <select
                 required
                 value={mechanicName}
                 onChange={(e) => setMechanicName(e.target.value)}
-                placeholder="Nome do técnico"
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold focus:outline-hidden"
-              />
+              >
+                <option value="">Selecione o mecânico...</option>
+                {mechanics.map((m) => (
+                  <option key={m.id} value={m.name}>
+                    {m.name}
+                  </option>
+                ))}
+                {/* Keeps the current value selectable even if it's a legacy
+                    free-text name or a mechanic without store access. */}
+                {mechanicName && !mechanics.some((m) => m.name === mechanicName) && (
+                  <option value={mechanicName}>{mechanicName}</option>
+                )}
+              </select>
             </div>
           </div>
+
+          {/* Checklist técnico de revisão de garantia - só aparece com o
+              tipo certo e o KM de entrada já preenchido. */}
+          {serviceType === 'REVISAO_GARANTIA' && currentKm > 0 && (
+            <div className="border border-indigo-200 bg-indigo-50/40 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <h4 className="font-bold text-indigo-950 text-xs uppercase tracking-wider flex items-center gap-2">
+                  <ClipboardList className="w-4 h-4 text-indigo-600" />
+                  Checklist de Verificação da Revisão
+                </h4>
+                <button
+                  type="button"
+                  onClick={handlePrintChecklist}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold rounded-lg shadow-xs cursor-pointer transition-colors"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  Imprimir para o Mecânico
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+                {REVISION_CHECKLIST_TEMPLATE.map((cat) => (
+                  <div key={cat.category} className="space-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-700">{cat.category}</p>
+                    {cat.items.map((item) => (
+                      <label key={item.id} className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={checklistState[item.id] ?? true}
+                          onChange={() => toggleChecklistItem(item.id)}
+                          className="w-3.5 h-3.5 text-indigo-600 rounded-sm border-slate-300 cursor-pointer"
+                        />
+                        <span>
+                          {item.label}{' '}
+                          <span className="text-slate-400 font-medium">({item.action})</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Motivo & Relato */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
