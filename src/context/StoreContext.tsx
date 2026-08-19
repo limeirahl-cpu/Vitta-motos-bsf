@@ -17,9 +17,10 @@ import {
   serviceOrderFromRow,
   serviceOrderToRow,
   serviceToRow,
-  settingsFromRow,
-  settingsToRow,
   stockMovementFromRow,
+  storeFromRow,
+  storeToRow,
+  userStoreAccessFromRow,
   warrantyRevisionFromRow,
 } from '../lib/mappers';
 import {
@@ -36,9 +37,11 @@ import {
   ServiceOrderStatus,
   StockExitReason,
   StockMovement,
+  Store,
   StoreSettings,
   SystemNotification,
   UserRole,
+  UserStoreAccess,
   WarrantyRevision,
   WarrantyRuleConfig,
   WorkshopService,
@@ -62,6 +65,16 @@ interface StoreContextType {
   pendingErrorReportsCount: number;
   isDataReady: boolean;
 
+  // Multi-store
+  stores: Store[];
+  activeStoreId: string | null;
+  setActiveStoreId: (id: string) => void;
+  addStore: (data: Omit<Store, 'id' | 'active' | 'createdAt'>) => Promise<{ success: boolean; store?: Store; message?: string }>;
+  updateStore: (id: string, updates: Partial<Store>) => Promise<{ success: boolean; message?: string }>;
+  userStoreAccessList: UserStoreAccess[];
+  grantStoreAccess: (userId: string, storeId: string) => Promise<{ success: boolean; message?: string }>;
+  revokeStoreAccess: (userId: string, storeId: string) => Promise<{ success: boolean; message?: string }>;
+
   addErrorReport: (data: Omit<ErrorReport, 'id' | 'createdAt' | 'status'>) => Promise<{
     success: boolean;
     report?: ErrorReport;
@@ -75,12 +88,12 @@ interface StoreContextType {
   ) => Promise<{ success: boolean; message?: string }>;
   deleteErrorReport: (id: string) => Promise<{ success: boolean; message?: string }>;
 
-  addClient: (client: Omit<Client, 'id' | 'createdAt'>) => Promise<{ success: boolean; client?: Client; message?: string }>;
+  addClient: (client: Omit<Client, 'id' | 'createdAt' | 'storeId'>) => Promise<{ success: boolean; client?: Client; message?: string }>;
   updateClient: (id: string, updates: Partial<Client>) => Promise<{ success: boolean; message?: string }>;
   deleteClient: (id: string) => Promise<{ success: boolean; message?: string }>;
 
   addMotorcycle: (
-    moto: Omit<Motorcycle, 'id' | 'createdAt'>
+    moto: Omit<Motorcycle, 'id' | 'createdAt' | 'storeId'>
   ) => Promise<{ success: boolean; motorcycle?: Motorcycle; message?: string }>;
   updateMotorcycle: (id: string, updates: Partial<Motorcycle>) => Promise<{ success: boolean; message?: string }>;
   updateMotorcycleKm: (id: string, newKm: number) => Promise<{ success: boolean; message?: string }>;
@@ -92,7 +105,7 @@ interface StoreContextType {
     errors: string[];
   }>;
 
-  addPart: (part: Omit<Part, 'id' | 'createdAt'>) => Promise<{ success: boolean; part?: Part; message?: string }>;
+  addPart: (part: Omit<Part, 'id' | 'createdAt' | 'storeId'>) => Promise<{ success: boolean; part?: Part; message?: string }>;
   updatePart: (id: string, updates: Partial<Part>) => Promise<{ success: boolean; message?: string }>;
   deletePart: (id: string) => Promise<{ success: boolean; message?: string }>;
   recalculateAllPartsPrices: (markupPercent?: number) => Promise<{ success: boolean; count: number; markup: number }>;
@@ -115,13 +128,13 @@ interface StoreContextType {
   }) => Promise<{ success: boolean; message?: string }>;
 
   addService: (
-    service: Omit<WorkshopService, 'id' | 'createdAt'>
+    service: Omit<WorkshopService, 'id' | 'createdAt' | 'storeId'>
   ) => Promise<{ success: boolean; service?: WorkshopService; message?: string }>;
   updateService: (id: string, updates: Partial<WorkshopService>) => Promise<{ success: boolean; message?: string }>;
   deleteService: (id: string) => Promise<{ success: boolean; message?: string }>;
 
   createServiceOrder: (
-    osData: Omit<ServiceOrder, 'id' | 'orderNumber' | 'stockDeducted' | 'openedAt'>
+    osData: Omit<ServiceOrder, 'id' | 'orderNumber' | 'stockDeducted' | 'openedAt' | 'storeId'>
   ) => Promise<{ success: boolean; order?: ServiceOrder; message?: string }>;
   updateServiceOrder: (id: string, updates: Partial<ServiceOrder>) => Promise<{ success: boolean; message?: string }>;
   changeServiceOrderStatus: (id: string, newStatus: ServiceOrderStatus) => Promise<{ success: boolean; message?: string }>;
@@ -194,9 +207,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [warrantyRevisions, setWarrantyRevisions] = useState<WarrantyRevision[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [settings, setSettings] = useState<StoreSettings>(DEFAULT_SETTINGS);
   const [errorReports, setErrorReports] = useState<ErrorReport[]>([]);
   const [rolePermissions, setRolePermissions] = useState<RolePermission[]>([]);
+  const [stores, setStores] = useState<Store[]>([]);
+  const [userStoreAccessList, setUserStoreAccessList] = useState<UserStoreAccess[]>([]);
+  const [activeStoreId, setActiveStoreIdState] = useState<string | null>(null);
+  const [isStoresReady, setIsStoresReady] = useState(false);
   const [isDataReady, setIsDataReady] = useState(false);
 
   const currentUserRef = useRef(currentUser);
@@ -204,53 +220,99 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     currentUserRef.current = currentUser;
   }, [currentUser]);
 
+  const activeStoreIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeStoreIdRef.current = activeStoreId;
+  }, [activeStoreId]);
+
+  const settings: StoreSettings = stores.find((s) => s.id === activeStoreId) || DEFAULT_SETTINGS;
+
+  const setActiveStoreId = (id: string) => {
+    setActiveStoreIdState(id);
+    try {
+      if (currentUserRef.current) {
+        localStorage.setItem(`vitta_active_store_${currentUserRef.current.id}`, id);
+      }
+    } catch {
+      // ignore localStorage failures
+    }
+  };
+
   const pendingErrorReportsCount = errorReports.filter(
     (e) => e.status === 'PENDENTE' || e.status === 'EM_ANALISE'
   ).length;
 
-  // ---------- Fetch helpers (initial load + realtime "refetch this slice") ----------
+  // ---------- Fetch helpers ----------
+  // Store-scoped tables always read the CURRENT active store via the ref,
+  // so realtime callbacks (set up once) never use a stale store id.
+  const refetchStores = async () => {
+    const { data } = await supabase.from('stores').select('*').order('created_at', { ascending: true });
+    if (data) setStores(data.map(storeFromRow));
+    return data;
+  };
+  const refetchUserStoreAccess = async () => {
+    const { data } = await supabase.from('user_store_access').select('*');
+    if (data) setUserStoreAccessList(data.map(userStoreAccessFromRow));
+  };
+
   const refetchClients = async () => {
-    const { data } = await supabase.from('clients').select('*').order('created_at', { ascending: false });
+    if (!activeStoreIdRef.current) return;
+    const { data } = await supabase.from('clients').select('*').eq('store_id', activeStoreIdRef.current).order('created_at', { ascending: false });
     if (data) setClients(data.map(clientFromRow));
   };
   const refetchMotorcycles = async () => {
-    const { data } = await supabase.from('motorcycles').select('*').order('created_at', { ascending: false });
+    if (!activeStoreIdRef.current) return;
+    const { data } = await supabase.from('motorcycles').select('*').eq('store_id', activeStoreIdRef.current).order('created_at', { ascending: false });
     if (data) setMotorcycles(data.map(motorcycleFromRow));
   };
   const refetchParts = async () => {
-    const { data } = await supabase.from('parts').select('*').order('name', { ascending: true });
+    if (!activeStoreIdRef.current) return;
+    const { data } = await supabase.from('parts').select('*').eq('store_id', activeStoreIdRef.current).order('name', { ascending: true });
     if (data) setParts(data.map(partFromRow));
   };
   const refetchServices = async () => {
-    const { data } = await supabase.from('workshop_services').select('*').order('created_at', { ascending: false });
+    if (!activeStoreIdRef.current) return;
+    const { data } = await supabase.from('workshop_services').select('*').eq('store_id', activeStoreIdRef.current).order('created_at', { ascending: false });
     if (data) setServices(data.map(serviceFromRow));
   };
   const refetchServiceOrders = async () => {
+    if (!activeStoreIdRef.current) return;
     const { data } = await supabase
       .from('service_orders')
       .select('*, service_order_services(*), service_order_parts(*)')
+      .eq('store_id', activeStoreIdRef.current)
       .order('opened_at', { ascending: false });
     if (data) setServiceOrders(data.map(serviceOrderFromRow));
   };
   const refetchStockMovements = async () => {
-    const { data } = await supabase.from('stock_movements').select('*').order('date', { ascending: false }).limit(1000);
+    if (!activeStoreIdRef.current) return;
+    const { data } = await supabase.from('stock_movements').select('*').eq('store_id', activeStoreIdRef.current).order('date', { ascending: false }).limit(1000);
     if (data) setStockMovements(data.map(stockMovementFromRow));
   };
   const refetchWarrantyRevisions = async () => {
-    const { data } = await supabase.from('warranty_revisions').select('*').order('created_at', { ascending: false });
+    if (!activeStoreIdRef.current) return;
+    const { data } = await supabase.from('warranty_revisions').select('*').eq('store_id', activeStoreIdRef.current).order('created_at', { ascending: false });
     if (data) setWarrantyRevisions(data.map(warrantyRevisionFromRow));
   };
   const refetchNotifications = async () => {
-    const { data } = await supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(300);
+    if (!activeStoreIdRef.current) return;
+    const { data } = await supabase
+      .from('notifications')
+      .select('*')
+      .or(`store_id.is.null,store_id.eq.${activeStoreIdRef.current}`)
+      .order('created_at', { ascending: false })
+      .limit(300);
     if (data) setNotifications(data.map(notificationFromRow));
   };
   const refetchAuditLogs = async () => {
-    const { data } = await supabase.from('audit_logs').select('*').order('timestamp', { ascending: false }).limit(1000);
+    if (!activeStoreIdRef.current) return;
+    const { data } = await supabase
+      .from('audit_logs')
+      .select('*')
+      .or(`store_id.is.null,store_id.eq.${activeStoreIdRef.current}`)
+      .order('timestamp', { ascending: false })
+      .limit(1000);
     if (data) setAuditLogs(data.map(auditLogFromRow));
-  };
-  const refetchSettings = async () => {
-    const { data } = await supabase.from('store_settings').select('*').eq('id', 1).single();
-    if (data) setSettings(settingsFromRow(data));
   };
   const refetchErrorReports = async () => {
     const { data } = await supabase.from('error_reports').select('*').order('created_at', { ascending: false });
@@ -261,8 +323,60 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (data) setRolePermissions(data.map(rolePermissionFromRow));
   };
 
+  // Stage 1: once authenticated, load the list of accessible stores and
+  // figure out which one is "active" (persisted per-user, else the first
+  // available store).
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated || !currentUser) {
+      setStores([]);
+      setUserStoreAccessList([]);
+      setActiveStoreIdState(null);
+      setIsStoresReady(false);
+      setIsDataReady(false);
+      return;
+    }
+
+    let active = true;
+    (async () => {
+      const [storeRows] = await Promise.all([refetchStores(), refetchUserStoreAccess(), refetchRolePermissions(), refetchErrorReports()]);
+      if (!active) return;
+
+      const accessibleStores = (storeRows || []).map(storeFromRow);
+      let nextActiveId: string | null = null;
+      try {
+        const saved = localStorage.getItem(`vitta_active_store_${currentUser.id}`);
+        if (saved && accessibleStores.some((s) => s.id === saved)) {
+          nextActiveId = saved;
+        }
+      } catch {
+        // ignore
+      }
+      if (!nextActiveId && accessibleStores.length > 0) {
+        nextActiveId = accessibleStores[0].id;
+      }
+      setActiveStoreIdState(nextActiveId);
+      setIsStoresReady(true);
+    })();
+
+    const storesChannel = supabase
+      .channel('stores-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stores' }, refetchStores)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_store_access' }, refetchUserStoreAccess)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'role_permissions' }, refetchRolePermissions)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'error_reports' }, refetchErrorReports)
+      .subscribe();
+
+    return () => {
+      active = false;
+      supabase.removeChannel(storesChannel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, currentUser?.id]);
+
+  // Stage 2: once we know which store is active, load that store's business
+  // data and keep it live via realtime.
+  useEffect(() => {
+    if (!isStoresReady || !activeStoreId) {
       setClients([]);
       setMotorcycles([]);
       setParts([]);
@@ -272,9 +386,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setWarrantyRevisions([]);
       setNotifications([]);
       setAuditLogs([]);
-      setSettings(DEFAULT_SETTINGS);
-      setErrorReports([]);
-      setRolePermissions([]);
       setIsDataReady(false);
       return;
     }
@@ -291,16 +402,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         refetchWarrantyRevisions(),
         refetchNotifications(),
         refetchAuditLogs(),
-        refetchSettings(),
-        refetchErrorReports(),
-        refetchRolePermissions(),
       ]);
       if (active) setIsDataReady(true);
     })();
 
-    // Realtime: a change made by ANY user on ANY device refreshes the
-    // relevant slice here - this is what solves the "each browser has its
-    // own copy" limitation of the original localStorage version.
+    // Realtime listens globally per table (simpler than per-store channel
+    // filters); each refetch always re-queries scoped to the CURRENT active
+    // store via the ref, so a change in another store just triggers a
+    // harmless no-op refresh.
     const channel = supabase
       .channel('store-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, refetchClients)
@@ -314,9 +423,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       .on('postgres_changes', { event: '*', schema: 'public', table: 'warranty_revisions' }, refetchWarrantyRevisions)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, refetchNotifications)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_logs' }, refetchAuditLogs)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'store_settings' }, refetchSettings)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'error_reports' }, refetchErrorReports)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'role_permissions' }, refetchRolePermissions)
       .subscribe();
 
     return () => {
@@ -324,7 +430,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated]);
+  }, [isStoresReady, activeStoreId]);
 
   // ---------- Shared helpers ----------
   const logAudit = async (action: string, details: string, affectedEntity: string, entityId?: string) => {
@@ -335,6 +441,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       details,
       affected_entity: affectedEntity,
       entity_id: entityId || null,
+      store_id: activeStoreIdRef.current,
     });
   };
 
@@ -351,6 +458,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       type,
       link_target: linkTarget || null,
       link_id: linkId || null,
+      store_id: activeStoreIdRef.current,
     });
   };
 
@@ -362,10 +470,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const getMotorcycleById = (id: string) => motorcycles.find((m) => m.id === id);
   const getPartById = (id: string) => parts.find((p) => p.id === id);
 
-  // Admin always sees everything, regardless of what's configured in
-  // role_permissions - this table only controls the OTHER roles, and
-  // defaults to visible (true) if a role/section combination has no row
-  // yet, so newly added sections don't silently disappear for everyone.
   const canViewSection = (role: UserRole | undefined, sectionKey: SectionKey): boolean => {
     if (!role) return false;
     if (role === 'admin') return true;
@@ -373,10 +477,47 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return found ? found.canView : true;
   };
 
+  // ---------- STORES ----------
+  const addStore = async (data: Omit<Store, 'id' | 'active' | 'createdAt'>) => {
+    const row = storeToRow(data);
+    row.created_by = currentUserRef.current?.id || null;
+    const { data: newRow, error } = await supabase.from('stores').insert(row).select().single();
+    if (error || !newRow) return { success: false, message: error?.message || 'Erro ao cadastrar loja.' };
+    const newStore = storeFromRow(newRow);
+    await logAudit('Cadastro de Loja', `Cadastrou a loja "${newStore.storeName}" (${newStore.city})`, 'Lojas', newStore.id);
+    return { success: true, store: newStore };
+  };
+
+  const updateStore = async (id: string, updates: Partial<Store>) => {
+    const { error } = await supabase.from('stores').update(storeToRow(updates)).eq('id', id);
+    if (error) return { success: false, message: error.message };
+    await refetchStores();
+    await logAudit('Edição de Loja', `Atualizou dados da loja ID: ${id}`, 'Lojas', id);
+    return { success: true };
+  };
+
+  const grantStoreAccess = async (userId: string, storeId: string) => {
+    const { error } = await supabase
+      .from('user_store_access')
+      .insert({ user_id: userId, store_id: storeId, granted_by: currentUserRef.current?.id || null });
+    if (error) return { success: false, message: error.message };
+    await refetchUserStoreAccess();
+    return { success: true };
+  };
+
+  const revokeStoreAccess = async (userId: string, storeId: string) => {
+    const { error } = await supabase.from('user_store_access').delete().eq('user_id', userId).eq('store_id', storeId);
+    if (error) return { success: false, message: error.message };
+    await refetchUserStoreAccess();
+    return { success: true };
+  };
+
   // ---------- CLIENTS ----------
-  const addClient = async (clientData: Omit<Client, 'id' | 'createdAt'>) => {
+  const addClient = async (clientData: Omit<Client, 'id' | 'createdAt' | 'storeId'>) => {
+    if (!activeStoreId) return { success: false, message: 'Nenhuma loja selecionada.' };
     const row = clientToRow(clientData);
     row.created_by = currentUserRef.current?.id || null;
+    row.store_id = activeStoreId;
     const { data, error } = await supabase.from('clients').insert(row).select().single();
     if (error || !data) return { success: false, message: error?.message || 'Erro ao cadastrar cliente.' };
     const newClient = clientFromRow(data);
@@ -414,7 +555,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   // ---------- MOTORCYCLES ----------
-  const addMotorcycle = async (motoData: Omit<Motorcycle, 'id' | 'createdAt'>) => {
+  const addMotorcycle = async (motoData: Omit<Motorcycle, 'id' | 'createdAt' | 'storeId'>) => {
+    if (!activeStoreId) return { success: false, message: 'Nenhuma loja selecionada.' };
     const cleanPlate = motoData.plate.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
     const plateExists = motorcycles.some(
       (m) => m.plate.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() === cleanPlate
@@ -425,6 +567,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const row = motorcycleToRow({ ...motoData, brand: 'Shineray', plate: cleanPlate });
     row.created_by = currentUserRef.current?.id || null;
+    row.store_id = activeStoreId;
 
     const { data, error } = await supabase.from('motorcycles').insert(row).select().single();
     if (error) {
@@ -609,14 +752,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     return { success: importedCount > 0, importedCount, createdClientsCount, errors };
   };
+
   // ---------- PARTS & INVENTORY ----------
-  const addPart = async (partData: Omit<Part, 'id' | 'createdAt'>) => {
+  const addPart = async (partData: Omit<Part, 'id' | 'createdAt' | 'storeId'>) => {
+    if (!activeStoreId) return { success: false, message: 'Nenhuma loja selecionada.' };
     const skuExists = parts.some((p) => p.sku.toLowerCase().trim() === partData.sku.toLowerCase().trim());
     if (skuExists) {
       return { success: false, message: `Já existe uma peça com o código SKU "${partData.sku}".` };
     }
 
-    const { data, error } = await supabase.from('parts').insert(partToRow(partData)).select().single();
+    const row = partToRow(partData);
+    row.store_id = activeStoreId;
+    const { data, error } = await supabase.from('parts').insert(row).select().single();
     if (error) {
       if (error.code === '23505') {
         return { success: false, message: `Já existe uma peça com o código SKU "${partData.sku}".` };
@@ -639,6 +786,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         user_id: currentUserRef.current?.id || null,
         user_name: currentUserRef.current?.name || 'Sistema',
         notes: 'Estoque inicial cadastrado',
+        store_id: activeStoreId,
       });
     }
 
@@ -751,8 +899,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   // ---------- SERVICES CATALOG ----------
-  const addService = async (srvData: Omit<WorkshopService, 'id' | 'createdAt'>) => {
-    const { data, error } = await supabase.from('workshop_services').insert(serviceToRow(srvData)).select().single();
+  const addService = async (srvData: Omit<WorkshopService, 'id' | 'createdAt' | 'storeId'>) => {
+    if (!activeStoreId) return { success: false, message: 'Nenhuma loja selecionada.' };
+    const row = serviceToRow(srvData);
+    row.store_id = activeStoreId;
+    const { data, error } = await supabase.from('workshop_services').insert(row).select().single();
     if (error) return { success: false, message: error.message };
     const newSrv = serviceFromRow(data);
     await logAudit('Cadastro de Serviço', `Cadastrou o serviço "${newSrv.name}"`, 'Serviços', newSrv.id);
@@ -775,14 +926,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // ---------- SERVICE ORDERS ----------
   const createServiceOrder = async (
-    osData: Omit<ServiceOrder, 'id' | 'orderNumber' | 'stockDeducted' | 'openedAt'>
+    osData: Omit<ServiceOrder, 'id' | 'orderNumber' | 'stockDeducted' | 'openedAt' | 'storeId'>
   ) => {
+    if (!activeStoreId) return { success: false, message: 'Nenhuma loja selecionada.' };
     const moto = getMotorcycleById(osData.motorcycleId);
     if (moto && osData.currentKm > moto.currentKm) {
       await updateMotorcycleKm(moto.id, osData.currentKm);
     }
 
     const { data: orderId, error } = await supabase.rpc('create_service_order', {
+      p_store_id: activeStoreId,
       p_client_id: osData.clientId,
       p_motorcycle_id: osData.motorcycleId,
       p_current_km: osData.currentKm,
@@ -915,6 +1068,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await logAudit('Exclusão de OS', `Excluiu a ${os.orderNumber}`, 'Ordens de Serviço', id);
     return { success: true };
   };
+
   // ---------- WARRANTY REVISIONS ----------
   const registerCompletedRevision = async (data: {
     motorcycleId: string;
@@ -943,6 +1097,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       mechanic_name: data.mechanicName || 'Oficina',
       notes: data.notes || `Revisão de ${targetKm} km concluída com sucesso`,
       registered_by_user_id: currentUserRef.current?.id || null,
+      store_id: moto.storeId,
     });
     if (error) return { success: false, message: error.message };
 
@@ -953,7 +1108,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await refetchMotorcycles();
 
     const updatedRevisions = [...warrantyRevisions, {
-      id: 'temp', motorcycleId: data.motorcycleId, revisionNumber: data.revisionNumber, targetKm,
+      id: 'temp', storeId: moto.storeId, motorcycleId: data.motorcycleId, revisionNumber: data.revisionNumber, targetKm,
       maxDate: data.completedDate, status: 'REALIZADA' as const, completed: true,
       completedDate: data.completedDate, completedKm: data.completedKm, createdAt: new Date().toISOString(),
     }];
@@ -1005,41 +1160,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await supabase.from('notifications').delete().eq('id', id);
   };
 
-  // ---------- SETTINGS ----------
+  // ---------- SETTINGS (thin wrappers over the active store) ----------
   const updateSettings = async (updates: Partial<StoreSettings>) => {
-    const { error } = await supabase.from('store_settings').update(settingsToRow(updates)).eq('id', 1);
-    if (error) return { success: false, message: error.message };
-    await logAudit('Configurações Atualizadas', 'Atualizou as configurações gerais da loja', 'Configurações');
-    return { success: true };
+    if (!activeStoreId) return { success: false, message: 'Nenhuma loja selecionada.' };
+    const res = await updateStore(activeStoreId, updates);
+    return res;
   };
 
   const updateWarrantyRules = async (rules: WarrantyRuleConfig) => {
-    const { error } = await supabase.from('store_settings').update(settingsToRow({ warrantyRules: rules })).eq('id', 1);
-    if (error) return { success: false, message: error.message };
-    await logAudit(
-      'Regras de Revisão Atualizadas',
-      `1ª revisão: ${rules.firstRevisionKm}km, Intervalo: ${rules.subsequentIntervalKm}km, Meses: ${rules.intervalMonths}m`,
-      'Configurações'
-    );
-    return { success: true };
-  };
-
-  const updateRolePermission = async (role: UserRole, sectionKey: SectionKey, canView: boolean) => {
-    if (role === 'admin') {
-      return { success: false, message: 'O administrador sempre tem acesso a todas as seções.' };
+    if (!activeStoreId) return { success: false, message: 'Nenhuma loja selecionada.' };
+    const res = await updateStore(activeStoreId, { warrantyRules: rules });
+    if (res.success) {
+      await logAudit(
+        'Regras de Revisão Atualizadas',
+        `1ª revisão: ${rules.firstRevisionKm}km, Intervalo: ${rules.subsequentIntervalKm}km, Meses: ${rules.intervalMonths}m`,
+        'Configurações'
+      );
     }
-    const { error } = await supabase
-      .from('role_permissions')
-      .upsert({ role, section_key: sectionKey, can_view: canView, updated_at: new Date().toISOString() }, { onConflict: 'role,section_key' });
-    if (error) return { success: false, message: error.message };
-
-    await refetchRolePermissions();
-    await logAudit(
-      'Permissões de Papel Atualizadas',
-      `${canView ? 'Concedeu' : 'Revogou'} acesso à seção "${sectionKey}" para o papel "${role}"`,
-      'Configurações'
-    );
-    return { success: true };
+    return res;
   };
 
   // ---------- ERROR & BUG REPORTS ----------
@@ -1094,34 +1232,33 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return { success: true, message: 'Chamado removido com sucesso.' };
   };
 
-  // ---------- RESET & EXPORT / IMPORT ----------
+  // ---------- RESET & EXPORT / IMPORT (scoped to the active store) ----------
   const resetDatabase = async () => {
-    // Deletes every business record permanently - order matters because of
-    // foreign keys. store_settings and the user list are left untouched.
-    await supabase.from('service_order_parts').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('service_order_services').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('stock_movements').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('warranty_revisions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('service_orders').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('motorcycles').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('clients').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('parts').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('notifications').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('audit_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    if (!activeStoreId) return { success: false, message: 'Nenhuma loja selecionada.' };
+    await supabase.from('service_order_parts').delete().in('service_order_id', serviceOrders.map((o) => o.id).length ? serviceOrders.map((o) => o.id) : ['00000000-0000-0000-0000-000000000000']);
+    await supabase.from('service_order_services').delete().in('service_order_id', serviceOrders.map((o) => o.id).length ? serviceOrders.map((o) => o.id) : ['00000000-0000-0000-0000-000000000000']);
+    await supabase.from('stock_movements').delete().eq('store_id', activeStoreId);
+    await supabase.from('warranty_revisions').delete().eq('store_id', activeStoreId);
+    await supabase.from('service_orders').delete().eq('store_id', activeStoreId);
+    await supabase.from('motorcycles').delete().eq('store_id', activeStoreId);
+    await supabase.from('clients').delete().eq('store_id', activeStoreId);
+    await supabase.from('parts').delete().eq('store_id', activeStoreId);
+    await supabase.from('notifications').delete().eq('store_id', activeStoreId);
+    await supabase.from('audit_logs').delete().eq('store_id', activeStoreId);
 
     await Promise.all([
       refetchClients(), refetchMotorcycles(), refetchParts(), refetchServiceOrders(),
       refetchStockMovements(), refetchWarrantyRevisions(), refetchNotifications(), refetchAuditLogs(),
     ]);
-    await logAudit('Limpeza Total de Dados', 'Apagou permanentemente todos os clientes, motos, OS, estoque e histórico do sistema', 'Sistema');
+    await logAudit('Limpeza Total de Dados', 'Apagou permanentemente todos os clientes, motos, OS, estoque e histórico desta loja', 'Sistema');
     return { success: true };
   };
 
   const exportDatabaseJSON = (): string => {
     const dump = {
-      version: '2.0-supabase',
+      version: '3.0-supabase-multistore',
       exportedAt: new Date().toISOString(),
-      settings,
+      store: settings,
       clients,
       motorcycles,
       parts,
@@ -1140,11 +1277,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (!data.clients || !data.motorcycles || !data.parts) {
         return { success: false, message: 'Arquivo JSON inválido ou incompatível com o sistema.' };
       }
-      // Re-importing directly into Supabase (rather than replacing local
-      // state) means going through the normal insert paths so IDs, FKs and
-      // RLS stay consistent, at the cost of not being a single atomic
-      // operation. This is intended for restoring a backup into an empty
-      // system, not for merging into an already-populated one.
       if (Array.isArray(data.clients)) {
         for (const c of data.clients) await addClient(c);
       }
@@ -1159,6 +1291,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } catch {
       return { success: false, message: 'Falha ao processar o arquivo JSON.' };
     }
+  };
+
+  const updateRolePermission = async (role: UserRole, sectionKey: SectionKey, canView: boolean) => {
+    if (role === 'admin') {
+      return { success: false, message: 'O administrador sempre tem acesso a todas as seções.' };
+    }
+    const { error } = await supabase
+      .from('role_permissions')
+      .upsert({ role, section_key: sectionKey, can_view: canView, updated_at: new Date().toISOString() }, { onConflict: 'role,section_key' });
+    if (error) return { success: false, message: error.message };
+
+    await refetchRolePermissions();
+    await logAudit(
+      'Permissões de Papel Atualizadas',
+      `${canView ? 'Concedeu' : 'Revogou'} acesso à seção "${sectionKey}" para o papel "${role}"`,
+      'Configurações'
+    );
+    return { success: true };
   };
 
   return (
@@ -1177,6 +1327,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         errorReports,
         pendingErrorReportsCount,
         isDataReady,
+        stores,
+        activeStoreId,
+        setActiveStoreId,
+        addStore,
+        updateStore,
+        userStoreAccessList,
+        grantStoreAccess,
+        revokeStoreAccess,
         addErrorReport,
         updateErrorReportStatus,
         deleteErrorReport,

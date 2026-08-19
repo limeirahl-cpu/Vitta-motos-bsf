@@ -14,9 +14,11 @@ import {
   RolePermission,
   ServiceOrder,
   StockMovement,
+  Store,
   StoreSettings,
   SystemNotification,
   User,
+  UserStoreAccess,
   WarrantyRevision,
   WorkshopService,
 } from '../types';
@@ -42,6 +44,7 @@ export function userFromRow(row: any): User {
 export function clientFromRow(row: any): Client {
   return {
     id: row.id,
+    storeId: row.store_id,
     name: row.name,
     cpfCnpj: row.cpf_cnpj,
     phone: row.phone,
@@ -64,6 +67,7 @@ export function clientFromRow(row: any): Client {
 
 export function clientToRow(c: Partial<Client>): Record<string, any> {
   const row: Record<string, any> = {};
+  if (c.storeId !== undefined) row.store_id = c.storeId;
   if (c.name !== undefined) row.name = c.name;
   if (c.cpfCnpj !== undefined) row.cpf_cnpj = c.cpfCnpj;
   if (c.phone !== undefined) row.phone = c.phone;
@@ -87,6 +91,7 @@ export function clientToRow(c: Partial<Client>): Record<string, any> {
 export function motorcycleFromRow(row: any): Motorcycle {
   return {
     id: row.id,
+    storeId: row.store_id,
     clientId: row.client_id,
     brand: row.brand,
     model: row.model,
@@ -116,6 +121,7 @@ export function motorcycleFromRow(row: any): Motorcycle {
 
 export function motorcycleToRow(m: Partial<Motorcycle> & { createdBy?: string }): Record<string, any> {
   const row: Record<string, any> = {};
+  if (m.storeId !== undefined) row.store_id = m.storeId;
   if (m.clientId !== undefined) row.client_id = m.clientId;
   if (m.brand !== undefined) row.brand = m.brand;
   if (m.model !== undefined) row.model = m.model;
@@ -147,6 +153,7 @@ export function motorcycleToRow(m: Partial<Motorcycle> & { createdBy?: string })
 export function serviceFromRow(row: any): WorkshopService {
   return {
     id: row.id,
+    storeId: row.store_id,
     name: row.name,
     description: row.description || '',
     defaultPrice: Number(row.default_price) || 0,
@@ -158,6 +165,7 @@ export function serviceFromRow(row: any): WorkshopService {
 
 export function serviceToRow(s: Partial<WorkshopService>): Record<string, any> {
   const row: Record<string, any> = {};
+  if (s.storeId !== undefined) row.store_id = s.storeId;
   if (s.name !== undefined) row.name = s.name;
   if (s.description !== undefined) row.description = s.description;
   if (s.defaultPrice !== undefined) row.default_price = s.defaultPrice;
@@ -170,6 +178,7 @@ export function serviceToRow(s: Partial<WorkshopService>): Record<string, any> {
 export function partFromRow(row: any): Part {
   return {
     id: row.id,
+    storeId: row.store_id,
     sku: row.sku,
     name: row.name,
     category: row.category || '',
@@ -189,6 +198,7 @@ export function partFromRow(row: any): Part {
 
 export function partToRow(p: Partial<Part>): Record<string, any> {
   const row: Record<string, any> = {};
+  if (p.storeId !== undefined) row.store_id = p.storeId;
   if (p.sku !== undefined) row.sku = p.sku;
   if (p.name !== undefined) row.name = p.name;
   if (p.category !== undefined) row.category = p.category;
@@ -209,6 +219,7 @@ export function partToRow(p: Partial<Part>): Record<string, any> {
 export function stockMovementFromRow(row: any): StockMovement {
   return {
     id: row.id,
+    storeId: row.store_id,
     partId: row.part_id,
     type: row.type,
     quantity: Number(row.quantity),
@@ -256,6 +267,7 @@ export function osPartItemFromRow(row: any): OSPartItem {
 export function serviceOrderFromRow(row: any): ServiceOrder {
   return {
     id: row.id,
+    storeId: row.store_id,
     orderNumber: row.order_number,
     clientId: row.client_id,
     motorcycleId: row.motorcycle_id,
@@ -349,6 +361,7 @@ export function osPartItemToRow(p: OSPartItem, serviceOrderId: string): Record<s
 export function warrantyRevisionFromRow(row: any): WarrantyRevision {
   return {
     id: row.id,
+    storeId: row.store_id,
     motorcycleId: row.motorcycle_id,
     revisionNumber: row.revision_number,
     targetKm: Number(row.target_km) || 0,
@@ -479,5 +492,77 @@ export function rolePermissionFromRow(row: any): RolePermission {
     role: row.role,
     sectionKey: row.section_key,
     canView: row.can_view,
+  };
+}
+
+// ---------- Stores ----------
+export function storeFromRow(row: any): Store {
+  return {
+    id: row.id,
+    storeName: row.name,
+    legalName: row.legal_name || '',
+    cnpj: row.cnpj || '',
+    phone: row.phone || '',
+    whatsapp: row.whatsapp || '',
+    email: row.email || '',
+    cep: row.cep || '',
+    address: row.address || '',
+    number: row.number || '',
+    neighborhood: row.neighborhood || '',
+    city: row.city || '',
+    state: row.state || '',
+    logoUrl: row.logo_url || undefined,
+    warrantyRules: {
+      skipFirst1000Km: row.warranty_skip_first_1000km,
+      firstRevisionKm: row.warranty_first_revision_km,
+      subsequentIntervalKm: row.warranty_subsequent_interval_km,
+      intervalMonths: row.warranty_interval_months,
+      alertDaysTolerance: row.warranty_alert_days_tolerance,
+      alertKmTolerance: row.warranty_alert_km_tolerance,
+    },
+    defaultMarkupPercent: row.default_markup_percent !== null ? Number(row.default_markup_percent) : undefined,
+    autoApplyMarkup: row.auto_apply_markup,
+    active: row.active,
+    createdAt: row.created_at,
+  };
+}
+
+export function storeToRow(s: Partial<Store>): Record<string, any> {
+  const row: Record<string, any> = {};
+  if (s.storeName !== undefined) row.name = s.storeName;
+  if (s.legalName !== undefined) row.legal_name = s.legalName;
+  if (s.cnpj !== undefined) row.cnpj = s.cnpj;
+  if (s.phone !== undefined) row.phone = s.phone;
+  if (s.whatsapp !== undefined) row.whatsapp = s.whatsapp;
+  if (s.email !== undefined) row.email = s.email;
+  if (s.cep !== undefined) row.cep = s.cep;
+  if (s.address !== undefined) row.address = s.address;
+  if (s.number !== undefined) row.number = s.number;
+  if (s.neighborhood !== undefined) row.neighborhood = s.neighborhood;
+  if (s.city !== undefined) row.city = s.city;
+  if (s.state !== undefined) row.state = s.state;
+  if (s.logoUrl !== undefined) row.logo_url = s.logoUrl;
+  if (s.defaultMarkupPercent !== undefined) row.default_markup_percent = s.defaultMarkupPercent;
+  if (s.autoApplyMarkup !== undefined) row.auto_apply_markup = s.autoApplyMarkup;
+  if (s.active !== undefined) row.active = s.active;
+  if (s.warrantyRules) {
+    const r = s.warrantyRules;
+    if (r.skipFirst1000Km !== undefined) row.warranty_skip_first_1000km = r.skipFirst1000Km;
+    if (r.firstRevisionKm !== undefined) row.warranty_first_revision_km = r.firstRevisionKm;
+    if (r.subsequentIntervalKm !== undefined) row.warranty_subsequent_interval_km = r.subsequentIntervalKm;
+    if (r.intervalMonths !== undefined) row.warranty_interval_months = r.intervalMonths;
+    if (r.alertDaysTolerance !== undefined) row.warranty_alert_days_tolerance = r.alertDaysTolerance;
+    if (r.alertKmTolerance !== undefined) row.warranty_alert_km_tolerance = r.alertKmTolerance;
+  }
+  return row;
+}
+
+// ---------- User Store Access ----------
+export function userStoreAccessFromRow(row: any): UserStoreAccess {
+  return {
+    userId: row.user_id,
+    storeId: row.store_id,
+    grantedAt: row.granted_at,
+    grantedBy: row.granted_by || undefined,
   };
 }

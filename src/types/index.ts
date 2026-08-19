@@ -17,6 +17,7 @@ export interface User {
 
 export interface Client {
   id: string;
+  storeId: string;
   name: string;
   cpfCnpj: string;
   phone: string;
@@ -38,6 +39,7 @@ export interface Client {
 
 export interface Motorcycle {
   id: string;
+  storeId: string;
   clientId: string;
   brand: string;
   model: string;
@@ -66,6 +68,7 @@ export interface Motorcycle {
 
 export interface WorkshopService {
   id: string;
+  storeId: string;
   name: string;
   description: string;
   defaultPrice: number;
@@ -76,6 +79,7 @@ export interface WorkshopService {
 
 export interface Part {
   id: string;
+  storeId: string;
   sku: string;
   name: string;
   category: string;
@@ -97,6 +101,7 @@ export type StockExitReason = 'USO_OS' | 'VENDA' | 'PERDA' | 'DEFEITO' | 'AJUSTE
 
 export interface StockMovement {
   id: string;
+  storeId: string;
   partId: string;
   type: StockMovementType;
   quantity: number;
@@ -146,6 +151,7 @@ export interface OSPartItem {
 
 export interface ServiceOrder {
   id: string;
+  storeId: string;
   orderNumber: string; // e.g. OS-00104
   clientId: string;
   motorcycleId: string;
@@ -179,6 +185,7 @@ export type RevisionStatus = 'DISTANTE' | 'PROXIMA' | 'VENCENDO' | 'ATRASADA' | 
 
 export interface WarrantyRevision {
   id: string;
+  storeId: string;
   motorcycleId: string;
   revisionNumber: number; // 1, 2, 3...
   targetKm: number;
@@ -281,6 +288,24 @@ export interface StoreSettings {
   warrantyRules: WarrantyRuleConfig;
   defaultMarkupPercent?: number; // % Margem padrão para precificação automática de peças (ex: 40%)
   autoApplyMarkup?: boolean; // Se deve calcular automaticamente o preço de venda
+}
+
+// A Store is one physical dealership location/tenant. Its fields are a
+// superset of StoreSettings (adds id/active/createdAt) since it fully
+// replaces the old single-tenant store_settings table.
+export interface Store extends StoreSettings {
+  id: string;
+  active: boolean;
+  createdAt: string;
+}
+
+// Which employees can access which store(s). Admins bypass this table
+// entirely - they always see every store.
+export interface UserStoreAccess {
+  userId: string;
+  storeId: string;
+  grantedAt: string;
+  grantedBy?: string;
 }
 
 export type SectionKey =

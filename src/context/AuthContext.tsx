@@ -40,7 +40,7 @@ interface AuthContextType {
     phone: string;
     role: UserRole;
     password: string;
-  }) => Promise<{ success: boolean; message?: string }>;
+  }) => Promise<{ success: boolean; message?: string; userId?: string }>;
   updateUser: (id: string, updates: Partial<User>) => Promise<{ success: boolean; message?: string }>;
   toggleUserActive: (id: string) => Promise<void>;
   deleteUser: (id: string) => Promise<{ success: boolean; message?: string }>;
@@ -316,14 +316,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     phone: string;
     role: UserRole;
     password: string;
-  }): Promise<{ success: boolean; message?: string }> => {
+  }): Promise<{ success: boolean; message?: string; userId?: string }> => {
     const { data: fnData, error } = await supabase.functions.invoke('admin-users', {
       body: { action: 'create', ...data },
     });
     if (error) return { success: false, message: error.message };
     if (!fnData?.success) return { success: false, message: fnData?.message || 'Falha ao criar usuário.' };
     await refreshUsers();
-    return { success: true };
+    return { success: true, userId: fnData.userId };
   };
 
   const updateUser = async (id: string, updates: Partial<User>): Promise<{ success: boolean; message?: string }> => {

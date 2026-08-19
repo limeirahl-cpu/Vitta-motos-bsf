@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   Bell,
   Bug,
+  Building2,
   ChevronDown,
   LogOut,
   Menu,
@@ -35,8 +36,9 @@ export const Navbar: React.FC<NavbarProps> = ({
     isAdmin,
     pendingApprovalCount,
   } = useAuth();
-  const { notifications, settings, pendingErrorReportsCount } = useStore();
+  const { notifications, settings, pendingErrorReportsCount, stores, activeStoreId, setActiveStoreId } = useStore();
   const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const [showStoreDropdown, setShowStoreDropdown] = useState(false);
   const [isReportErrorModalOpen, setIsReportErrorModalOpen] = useState(false);
 
   // Admin-only alert types (mirrors NotificationDrawer) excluded from the badge
@@ -98,6 +100,51 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
           </div>
         </div>
+
+        {/* Store switcher - only shown when the person has access to more
+            than one store (admins always see every store). */}
+        {stores.length > 1 && (
+          <div className="relative hidden md:block">
+            <button
+              type="button"
+              onClick={() => setShowStoreDropdown((v) => !v)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors cursor-pointer"
+              title="Trocar de loja"
+            >
+              <Building2 className="w-3.5 h-3.5 text-red-600" />
+              <span className="truncate max-w-[140px]">{settings.storeName || 'Selecionar loja'}</span>
+              <ChevronDown className="w-3 h-3 text-slate-400" />
+            </button>
+
+            {showStoreDropdown && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowStoreDropdown(false)} />
+                <div className="absolute left-0 top-full mt-1.5 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-50">
+                  <p className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Suas Lojas
+                  </p>
+                  {stores.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => {
+                        setActiveStoreId(s.id);
+                        setShowStoreDropdown(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between transition-colors cursor-pointer ${
+                        activeStoreId === s.id ? 'bg-red-50 text-red-700 font-bold' : 'text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="truncate">
+                        <span className="font-semibold">{s.storeName}</span>
+                        <span className="text-slate-400 ml-1">({s.city})</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Center: Global Search Bar trigger & Admin Pending Approval Balloon */}
