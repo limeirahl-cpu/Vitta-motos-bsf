@@ -1018,7 +1018,7 @@ export const AdminSettingsView: React.FC = () => {
       {/* ... usuarios view ... */}
 
       {/* TAB: PERMISSÕES POR FUNÇÃO */}
-      {activeTab === 'permissoes' && (      {activeTab === 'permissoes' && (
+      {activeTab === 'permissoes' && ( 
         <div className="space-y-4">
           <div className="p-4 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-start gap-3">
             <Lock className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
