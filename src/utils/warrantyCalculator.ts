@@ -11,12 +11,12 @@ export const DEFAULT_WARRANTY_RULES: WarrantyRuleConfig = {
 };
 
 /**
- * Calculates what the target KM for a revision number is.
- * If skipFirst1000Km is set, or if firstRevisionKm is customized (e.g. 3000, 4000):
- * 1 -> firstRevisionKm (e.g. 3000)
- * 2 -> firstRevisionKm + subsequentIntervalKm (e.g. 3000 + 3000 = 6000)
- * 3 -> firstRevisionKm + 2 * subsequentIntervalKm (e.g. 3000 + 6000 = 9000)
- * n -> firstRevisionKm + (n - 1) * subsequentIntervalKm
+ * Calculates what the target KM for a revision number is, matching
+ * Shineray's real revision table:
+ * 1 -> firstRevisionKm (e.g. 1000)
+ * 2 -> subsequentIntervalKm (e.g. 3000)
+ * 3 -> 2 * subsequentIntervalKm (e.g. 6000)
+ * n -> (n - 1) * subsequentIntervalKm, for n >= 2
  */
 export function calculateTargetKm(
   revisionNumber: number,
@@ -27,7 +27,7 @@ export function calculateTargetKm(
   if (revisionNumber <= 1) {
     return initialKm;
   }
-  return initialKm + (revisionNumber - 1) * interval;
+  return (revisionNumber - 1) * interval;
 }
 
 /**

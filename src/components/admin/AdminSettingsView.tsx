@@ -834,7 +834,7 @@ export const AdminSettingsView: React.FC = () => {
                   const targetKm =
                     revNum === 1
                       ? Number(firstRevisionKm)
-                      : Number(firstRevisionKm) + (revNum - 1) * Number(subsequentIntervalKm);
+                      : (revNum - 1) * Number(subsequentIntervalKm);
                   const months = revNum * Number(intervalMonths);
                   return (
                     <div

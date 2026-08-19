@@ -85,7 +85,7 @@ export function generateWarrantySchedule(
     const targetKm =
       i === 1
         ? rules.firstRevisionKm
-        : rules.firstRevisionKm + (i - 1) * rules.subsequentIntervalKm;
+        : (i - 1) * rules.subsequentIntervalKm;
 
     const monthsOffset = i * (rules.intervalMonths || 6);
     const maxDate = addMonths(billingDate, monthsOffset);
